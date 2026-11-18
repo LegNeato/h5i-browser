@@ -2159,22 +2159,24 @@ impl Page {
 
     pub fn type_into(&mut self, node_id: usize, text: &str) -> bool {
         let mut doc = self.doc.borrow_mut();
-        let takes_text = doc
-            .get_node(node_id)
-            .and_then(|node| node.element_data())
-            .and_then(|el| el.text_input_data())
-            .is_some();
-        if !takes_text {
+        let Some(input) = doc
+            .get_node_mut(node_id)
+            .and_then(|node| node.element_data_mut())
+            .and_then(|el| el.text_input_data_mut())
+        else {
             return false;
-        }
+        };
+        // Replace the buffer directly: selection depends on shaped glyph
+        // clusters and can collapse at the end when no font is available.
+        // Even a fontless field must replace its value and retain whitespace.
+        input.editor.set_text(text);
 
-        // Focus first: the caret is drawn from it, so a viewer watching sees
+        // Focus the edited field: the caret is drawn from it, so a viewer sees
         // the field an agent is typing into rather than text appearing in a
         // box nothing is pointing at.
         doc.set_focus_to(node_id);
         doc.with_text_input(node_id, |mut driver| {
-            driver.select_all();
-            driver.insert_or_replace_selection(text);
+            driver.move_to_text_end();
         });
         // Typing changes layout, a longer value can reflow the form, and
         // nothing else in this file re-resolves on the agent's behalf.
@@ -4450,6 +4452,38 @@ mod input_tests {
         assert_eq!(page.field_value(user).as_deref(), Some("alice"));
         assert!(page.type_into(user, "bob"));
         assert_eq!(page.field_value(user).as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn typing_without_fonts_replaces_the_value_and_preserves_whitespace() {
+        let broker = crate::net::LocalBroker::new(
+            Policy::new(), Arc::new(MemorySink::new()), None,
+        ).expect("broker");
+        let fonts = crate::fonts::load(&[], &[], Some(0));
+        assert!(fonts.is_empty());
+        let mut page = Page::from_html(
+            "<form method='post' action='/answer'>\
+             <input type='text' name='answer' placeholder='Amount'>\
+             <button type='submit'>Save</button></form>",
+            &Url::parse("https://site.example/page").unwrap(),
+            broker,
+            fonts,
+            PageOptions::default(),
+        );
+        let field = ref_node(&page, "Amount");
+        let submit = ref_node(&page, "Save");
+        assert!(!page.type_into(submit, "not a field"));
+        for (value, encoded) in [
+            ("1234", "answer=1234"),
+            ("56", "answer=56"),
+            ("", "answer="),
+            ("  exact £  ", "answer=++exact+%C2%A3++"),
+        ] {
+            assert!(page.type_into(field, value));
+            assert_eq!(page.field_value(field).as_deref(), Some(value));
+            let request = page.submit_form(submit).expect("submits");
+            assert_eq!(request.body, encoded.as_bytes());
+        }
     }
 
     #[test]
