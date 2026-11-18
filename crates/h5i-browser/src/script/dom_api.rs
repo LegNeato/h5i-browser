@@ -824,18 +824,18 @@ fn set_value(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
     let host = host(context)?;
     let reached_editor = {
         let mut doc = host.dom.borrow_mut();
-        let has_editor = doc
-            .get_node(id)
-            .and_then(|n| n.element_data())
-            .and_then(|el| el.text_input_data())
-            .is_some();
-        if has_editor {
-            doc.with_text_input(id, |mut driver| {
-                driver.select_all();
-                driver.insert_or_replace_selection(&value);
-            });
+        if let Some(input) = doc
+            .get_node_mut(id)
+            .and_then(|node| node.element_data_mut())
+            .and_then(|element| element.text_input_data_mut())
+        {
+            // Replacing a value must not depend on shaped glyphs. A selection
+            // can collapse when the document has no registered font.
+            input.editor.set_text(&value);
+            true
+        } else {
+            false
         }
-        has_editor
     };
     host.mark_dirty();
     // Whether the write landed, so the prelude knows if it has to remember the
