@@ -340,8 +340,20 @@ fn header_name_is_sendable(name: &str) -> bool {
             b.is_ascii_alphanumeric()
                 || matches!(
                     b,
-                    b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.'
-                        | b'^' | b'_' | b'`' | b'|' | b'~'
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
                 )
         })
 }
@@ -493,9 +505,15 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
     match &edit.target {
         Target::Method => {
             if removing {
-                return Err(EditError::new(&target, "a request without a method is not one"));
+                return Err(EditError::new(
+                    &target,
+                    "a request without a method is not one",
+                ));
             }
-            let was = std::mem::replace(&mut request.method, text(&value).trim().to_ascii_uppercase());
+            let was = std::mem::replace(
+                &mut request.method,
+                text(&value).trim().to_ascii_uppercase(),
+            );
             Ok(Applied {
                 target,
                 encoded: None,
@@ -507,7 +525,10 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
 
         Target::Url => {
             if removing {
-                return Err(EditError::new(&target, "a request without a URL has nowhere to go"));
+                return Err(EditError::new(
+                    &target,
+                    "a request without a URL has nowhere to go",
+                ));
             }
             let raw = text(&value);
             let parsed = Url::parse(raw.trim())
@@ -525,7 +546,10 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
 
         Target::Path => {
             if removing {
-                return Err(EditError::new(&target, "every URL has a path; set it to `/` instead"));
+                return Err(EditError::new(
+                    &target,
+                    "every URL has a path; set it to `/` instead",
+                ));
             }
             let asked = text(&value);
             let asked = asked.trim();
@@ -593,7 +617,11 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
                     // list, and collapsing it would change the request in a way
                     // nobody asked for.
                     if !replaced {
-                        next.push(format!("{}={}", encode_query(k), encode_query(&text(&value))));
+                        next.push(format!(
+                            "{}={}",
+                            encode_query(k),
+                            encode_query(&text(&value))
+                        ));
                         replaced = true;
                         continue;
                     }
@@ -665,9 +693,14 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
             } else {
                 current.split(';').collect()
             };
-            let named: Vec<(String, String)> =
-                pieces.iter().map(|piece| cookie_name_and_value(piece)).collect();
-            let was = named.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+            let named: Vec<(String, String)> = pieces
+                .iter()
+                .map(|piece| cookie_name_and_value(piece))
+                .collect();
+            let was = named
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone());
             if was.is_none() && !create && !removing {
                 return Err(missing(&target, "cookie", &named));
             }
@@ -743,8 +776,7 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
             }
             let mut encoded = None;
             if removing {
-                json_remove(&mut document, path)
-                    .map_err(|why| EditError::new(&target, why))?;
+                json_remove(&mut document, path).map_err(|why| EditError::new(&target, why))?;
             } else {
                 let typed = text(&value);
                 let parsed = serde_json::from_slice::<serde_json::Value>(&value)
@@ -783,15 +815,14 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
                 .iter()
                 .map(|piece| form_name_and_value(piece))
                 .collect();
-            let was = named.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+            let was = named
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone());
             if was.is_none() && !create && !removing {
                 return Err(missing(&target, "form field", &named));
             }
-            let encoded = format!(
-                "{}={}",
-                encode_query(name),
-                encode_query(&text(&value))
-            );
+            let encoded = format!("{}={}", encode_query(name), encode_query(&text(&value)));
             let mut replaced = false;
             let mut next: Vec<Vec<u8>> = Vec::with_capacity(pieces.len() + 1);
             for (piece, (k, _)) in pieces.iter().zip(&named) {
@@ -828,14 +859,15 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
             let mut parts = match crate::multipart::boundary_of(&declared) {
                 // Already multipart: take it apart, or say it is not the shape
                 // it claims rather than quietly replacing it.
-                Some(boundary) => crate::multipart::parse(&request.body, &boundary)
-                    .ok_or_else(|| {
+                Some(boundary) => {
+                    crate::multipart::parse(&request.body, &boundary).ok_or_else(|| {
                         EditError::new(
                             &target,
                             "this request says it is multipart and its body does not match \
                              the boundary it declares, so there is nothing to edit safely",
                         )
-                    })?,
+                    })?
+                }
                 None if request.body.is_empty() || create => {
                     // Not multipart yet. With `--create` this *builds* an
                     // upload, which is the common case: a file-upload test
@@ -849,7 +881,11 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
                         format!(
                             "this request's body is not multipart; its Content-Type is {}. \
                              Pass --create to build a multipart body instead",
-                            if declared.is_empty() { "unset" } else { &declared }
+                            if declared.is_empty() {
+                                "unset"
+                            } else {
+                                &declared
+                            }
                         ),
                     ));
                 }
@@ -908,7 +944,7 @@ fn apply_one(request: &mut Editable, edit: &Edit, create: bool) -> Result<Applie
             // The engine's own boundary, always. Re-using the one that arrived
             // means a caller who puts that string in a part's data splits the
             // message, and sends something other than what was asked for.
-            let boundary = crate::multipart::fresh_boundary();
+            let boundary = crate::multipart::boundary_for(&parts);
             request.body = crate::multipart::serialize(&parts, &boundary);
             request.set_header(
                 "Content-Type",
@@ -946,7 +982,10 @@ fn query_name(piece: &str) -> String {
 
 /// The decoded value of one piece, empty when it has none.
 fn query_value(piece: &str) -> String {
-    piece.split_once('=').map(|(_, v)| decode_query(v)).unwrap_or_default()
+    piece
+        .split_once('=')
+        .map(|(_, v)| decode_query(v))
+        .unwrap_or_default()
 }
 
 fn decode_query(raw: &str) -> String {
@@ -1109,9 +1148,9 @@ fn json_set(
                 .entry(segment.to_string())
                 .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new())),
             serde_json::Value::Array(items) => {
-                let index: usize = segment
-                    .parse()
-                    .map_err(|_| format!("`{segment}` is not an index, and that step is an array"))?;
+                let index: usize = segment.parse().map_err(|_| {
+                    format!("`{segment}` is not an index, and that step is an array")
+                })?;
                 items
                     .get_mut(index)
                     .ok_or_else(|| format!("this body's array has no index {index}"))?
@@ -1152,9 +1191,9 @@ fn json_remove(document: &mut serde_json::Value, path: &str) -> Result<(), Strin
                 .get_mut(*segment)
                 .ok_or_else(|| format!("this body has no `{segment}`"))?,
             serde_json::Value::Array(items) => {
-                let index: usize = segment
-                    .parse()
-                    .map_err(|_| format!("`{segment}` is not an index, and that step is an array"))?;
+                let index: usize = segment.parse().map_err(|_| {
+                    format!("`{segment}` is not an index, and that step is an array")
+                })?;
                 items
                     .get_mut(index)
                     .ok_or_else(|| format!("this body's array has no index {index}"))?
@@ -1213,7 +1252,10 @@ mod tests {
     fn a_query_parameter_is_replaced_in_place() {
         let mut request = request();
         let applied = apply(&mut request, &[set("query.user_id=456")], false).expect("applies");
-        assert_eq!(request.url.as_str(), "https://app.test/api/users?user_id=456&page=2");
+        assert_eq!(
+            request.url.as_str(),
+            "https://app.test/api/users?user_id=456&page=2"
+        );
         assert_eq!(applied[0].was.as_deref(), Some("123"));
         assert!(!applied[0].created);
     }
@@ -1282,7 +1324,11 @@ mod tests {
         };
         apply(
             &mut request,
-            &[set("json.user.role=admin"), set("json.user.id=99"), set("json.active=true")],
+            &[
+                set("json.user.role=admin"),
+                set("json.user.id=99"),
+                set("json.active=true"),
+            ],
             false,
         )
         .expect("applies");
@@ -1331,7 +1377,11 @@ mod tests {
         };
         let applied = apply(
             &mut request,
-            &[set("json.role=admin"), set("json.id=99"), set("json.active=true")],
+            &[
+                set("json.role=admin"),
+                set("json.id=99"),
+                set("json.active=true"),
+            ],
             false,
         )
         .expect("applies");
@@ -1358,7 +1408,11 @@ mod tests {
         let spelling = error.to_string();
         assert!(spelling.contains("too many digits"), "{spelling}");
         assert!(spelling.contains("body.raw"), "{spelling}");
-        assert_eq!(request.body, br#"{"id":1}"#.to_vec(), "and the body is untouched");
+        assert_eq!(
+            request.body,
+            br#"{"id":1}"#.to_vec(),
+            "and the body is untouched"
+        );
     }
 
     /// Exact integers remain numbers.
@@ -1407,7 +1461,10 @@ mod tests {
         };
         apply(
             &mut request,
-            &[set("method=POST"), set("json.service_name=-t custom \"id\"")],
+            &[
+                set("method=POST"),
+                set("json.service_name=-t custom \"id\""),
+            ],
             true,
         )
         .expect("builds");
@@ -1457,10 +1514,18 @@ mod tests {
             )],
             body: b"username=alice&password=hunter2".to_vec(),
         };
-        apply(&mut request, &[set("form.username=admin' OR '1'='1")], false).expect("applies");
+        apply(
+            &mut request,
+            &[set("form.username=admin' OR '1'='1")],
+            false,
+        )
+        .expect("applies");
         let pairs: Vec<(String, String)> =
             form_urlencoded::parse(&request.body).into_owned().collect();
-        assert_eq!(pairs[0].1, "admin' OR '1'='1", "the payload survives encoding");
+        assert_eq!(
+            pairs[0].1, "admin' OR '1'='1",
+            "the payload survives encoding"
+        );
         assert_eq!(pairs[1].1, "hunter2");
     }
 
@@ -1540,7 +1605,10 @@ mod tests {
         assert_eq!(parts[0].data, b"tok_1", "the other field is untouched");
         assert_eq!(parts[1].filename.as_deref(), Some("../../etc/passwd"));
         assert_eq!(parts[1].content_type.as_deref(), Some("image/png"));
-        assert_eq!(parts[1].data, b"\x89PNG data", "the file itself is untouched");
+        assert_eq!(
+            parts[1].data, b"\x89PNG data",
+            "the file itself is untouched"
+        );
     }
 
     /// `.name` is not `.filename`, and the difference has to be visible.
@@ -1582,15 +1650,23 @@ mod tests {
             body: b"{}".to_vec(),
         };
         let error = apply(&mut request, &[set("multipart.file=x")], false).expect_err("refused");
-        assert!(error.message.contains("application/json"), "{}", error.message);
+        assert!(
+            error.message.contains("application/json"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
     fn a_framing_header_is_refused_here_too() {
         let mut request = request();
-        let error = apply(&mut request, &[set("header.Content-Length=999")], false)
-            .expect_err("refused");
-        assert!(error.message.contains("client's to compute"), "{}", error.message);
+        let error =
+            apply(&mut request, &[set("header.Content-Length=999")], false).expect_err("refused");
+        assert!(
+            error.message.contains("client's to compute"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
@@ -1698,7 +1774,10 @@ mod tests {
             let mut request = request();
             let error = apply(&mut request, &[set(spelling)], false)
                 .expect_err("a backslash the parser rewrites is refused");
-            assert!(error.to_string().contains("backslash"), "{spelling}: {error}");
+            assert!(
+                error.to_string().contains("backslash"),
+                "{spelling}: {error}"
+            );
             assert_eq!(
                 request.url.as_str(),
                 "https://app.test/api/users?user_id=123&page=2",
@@ -1719,7 +1798,10 @@ mod tests {
             let mut request = request();
             let error = apply(&mut request, &[set(spelling)], true)
                 .expect_err("a header that cannot be sent is refused");
-            assert!(error.to_string().contains("--raw-request"), "{spelling}: {error}");
+            assert!(
+                error.to_string().contains("--raw-request"),
+                "{spelling}: {error}"
+            );
             assert_eq!(
                 request.header("cookie"),
                 Some("session=abc; theme=dark"),
@@ -1765,8 +1847,12 @@ mod tests {
         };
         apply(&mut request, &[set("query.role=admin")], true).expect("adds");
         assert_eq!(request.url.query(), Some("debug&id=1&id=2&role=admin"));
-        apply(&mut request, &[parse_unset("query.id").expect("parses")], false)
-            .expect("removes");
+        apply(
+            &mut request,
+            &[parse_unset("query.id").expect("parses")],
+            false,
+        )
+        .expect("removes");
         assert_eq!(request.url.query(), Some("debug&role=admin"));
     }
 
@@ -1865,14 +1951,45 @@ mod tests {
     #[test]
     fn an_edit_that_is_refused_leaves_the_request_exactly_as_it_was() {
         let targets = [
-            "method", "url", "path", "query.a", "query.", "header.X", "header.X A",
-            "cookie.s", "cookie.s;x", "json.a", "json.a.b", "json.", "form.f",
-            "multipart.f", "multipart.f.filename", "multipart.f.content_type",
-            "body.raw", "body.other", "nonsense", "", ".", "..", "query.a.b",
+            "method",
+            "url",
+            "path",
+            "query.a",
+            "query.",
+            "header.X",
+            "header.X A",
+            "cookie.s",
+            "cookie.s;x",
+            "json.a",
+            "json.a.b",
+            "json.",
+            "form.f",
+            "multipart.f",
+            "multipart.f.filename",
+            "multipart.f.content_type",
+            "body.raw",
+            "body.other",
+            "nonsense",
+            "",
+            ".",
+            "..",
+            "query.a.b",
         ];
         let values = [
-            "", "1", "..", "/a/../b", "\\\\..\\\\", "https://app.test/../x", "not a url",
-            "a\r\nb", "a; b=c", "{\"a\":1}", "%2e%2e", "@", "=", "a=b",
+            "",
+            "1",
+            "..",
+            "/a/../b",
+            "\\\\..\\\\",
+            "https://app.test/../x",
+            "not a url",
+            "a\r\nb",
+            "a; b=c",
+            "{\"a\":1}",
+            "%2e%2e",
+            "@",
+            "=",
+            "a=b",
         ];
         let bodies: [&[u8]; 4] = [b"", b"{\"a\":{\"b\":1}}", b"a=1&b=2", b"\xff\xd8not text"];
 
@@ -1910,12 +2027,23 @@ mod tests {
     #[test]
     fn no_arrangement_of_these_edits_panics() {
         let targets = [
-            "query.a", "query.é", "query.", "form.f", "form.é", "cookie.s", "cookie.é",
-            "json.a", "body.raw", "header.X", "method", "path", "url",
+            "query.a",
+            "query.é",
+            "query.",
+            "form.f",
+            "form.é",
+            "cookie.s",
+            "cookie.é",
+            "json.a",
+            "body.raw",
+            "header.X",
+            "method",
+            "path",
+            "url",
         ];
         let values = [
-            "", "=", "&", ";", " ", "é", "🙂", "a=b&c", "a; b", "\u{a0}x", "%", "%zz",
-            "\u{feff}", "..", "/a/../b",
+            "", "=", "&", ";", " ", "é", "🙂", "a=b&c", "a; b", "\u{a0}x", "%", "%zz", "\u{feff}",
+            "..", "/a/../b",
         ];
         // Bodies and URLs built out of the same sharp pieces.
         let queries = ["", "?a", "?a=1", "?é=1&a", "?=1", "?&&", "?a=%", "?🙂=1"];
@@ -1940,10 +2068,7 @@ mod tests {
                                     method: "POST".to_string(),
                                     url: Url::parse(&format!("https://app.test/p{query}"))
                                         .expect("a url"),
-                                    headers: vec![(
-                                        "Cookie".to_string(),
-                                        cookie.to_string(),
-                                    )],
+                                    headers: vec![("Cookie".to_string(), cookie.to_string())],
                                     body: body.to_vec(),
                                 };
                                 let spec = format!("{target}={value}");
@@ -2005,7 +2130,10 @@ mod tests {
             let mut request = request();
             let error = apply(&mut request, &[set(spec)], true)
                 .expect_err("a value the header cannot carry is refused");
-            assert!(error.to_string().contains("header.Cookie="), "{spec}: {error}");
+            assert!(
+                error.to_string().contains("header.Cookie="),
+                "{spec}: {error}"
+            );
             assert_eq!(request.header("cookie"), Some("session=abc; theme=dark"));
         }
         // Whitespace inside the value is ordinary and survives.

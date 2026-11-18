@@ -170,9 +170,7 @@ fn string_of(map: &Map<String, Value>, key: &str) -> Option<String> {
 }
 
 fn limit_of(map: &Map<String, Value>) -> Option<usize> {
-    map.get("limit")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
+    map.get("limit").and_then(Value::as_u64).map(|n| n as usize)
 }
 
 fn kind_of(value: &Value) -> &'static str {
@@ -291,7 +289,7 @@ fn eval(doc: &BaseDocument, base: &url::Url, scope: usize, field: &Field) -> Val
 /// Goes through the same scoped matcher the script realm's `querySelectorAll`
 /// uses, so an extraction and a page's own query agree about what matches.
 fn matches(doc: &BaseDocument, scope: usize, selector: &str) -> Vec<usize> {
-    crate::script::dom_api::matches_within(doc, scope, selector)
+    crate::dom_query::matches_within(doc, scope, selector)
 }
 
 fn first(doc: &BaseDocument, scope: usize, selector: &str) -> Option<usize> {
@@ -327,18 +325,18 @@ fn attribute(doc: &BaseDocument, base: &url::Url, node_id: usize, attr: &str) ->
     Some(crate::snapshot::collapse(&raw))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use serde_json::json;
 
     fn doc_of(html: &str) -> (crate::engine::Page, url::Url) {
         let broker = crate::net::LocalBroker::new(
-                crate::policy::Policy::new(),
-                std::sync::Arc::new(crate::receipt::MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            crate::policy::Policy::new(),
+            std::sync::Arc::new(crate::receipt::MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = crate::engine::PageFactory::new(
             broker,
@@ -400,8 +398,11 @@ mod tests {
                     <li><a href='/1'>one</a></li>\
                     <li><span>no link here</span></li>\
                     <li><a href='/3'>three</a></li></ul></body></html>";
-        let got = extract(html, json!({"urls": [{"selector": "li a", "attr": "href"}]}))
-            .expect("matched");
+        let got = extract(
+            html,
+            json!({"urls": [{"selector": "li a", "attr": "href"}]}),
+        )
+        .expect("matched");
         assert_eq!(
             got["urls"],
             json!(["https://app.example/1", "https://app.example/3"])
@@ -409,8 +410,8 @@ mod tests {
 
         // A match without the attribute keeps its place, so the list still
         // lines up with a sibling read over the same selector.
-        let aligned = extract(html, json!({"ids": [{"selector": "li", "attr": "id"}]}))
-            .expect("matched");
+        let aligned =
+            extract(html, json!({"ids": [{"selector": "li", "attr": "id"}]})).expect("matched");
         assert_eq!(aligned["ids"], json!([null, null, null]));
     }
 
@@ -459,10 +460,7 @@ mod tests {
         let err = parse(&json!({"x": ["a", "b"]})).expect_err("two entries");
         assert!(err.message.contains("exactly one"), "{}", err.message);
 
-        assert_eq!(
-            parse(&json!({})).expect_err("empty").code,
-            Code::BadRequest
-        );
+        assert_eq!(parse(&json!({})).expect_err("empty").code, Code::BadRequest);
         assert_eq!(
             parse(&json!("h1")).expect_err("not an object").code,
             Code::BadRequest

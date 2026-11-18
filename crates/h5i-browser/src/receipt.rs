@@ -1,10 +1,14 @@
 //! The request log, and the reason it is not merely a log.
 
+#[cfg(feature = "native")]
 use std::fs::{File, OpenOptions};
+#[cfg(feature = "native")]
 use std::io::Write;
+#[cfg(feature = "native")]
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+#[cfg(feature = "native")]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use h5i_error::H5iError;
 use serde::{Deserialize, Serialize};
@@ -25,10 +29,12 @@ pub trait Sink: Send + Sync + 'static {
 }
 
 /// A JSON-lines file, one record per line.
+#[cfg(feature = "native")]
 pub struct JsonlSink {
     file: Mutex<File>,
 }
 
+#[cfg(feature = "native")]
 impl JsonlSink {
     pub fn create(path: &Path) -> Result<Self, H5iError> {
         if let Some(parent) = path.parent()
@@ -52,6 +58,7 @@ impl JsonlSink {
 /// host, so the umask's 0644 published the account to anything on the machine.
 /// The mode is set at creation, so there is no window in which the file exists
 /// and is readable; an existing file is narrowed too.
+#[cfg(feature = "native")]
 fn open_owner_only(path: &Path) -> Result<File, H5iError> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
@@ -60,7 +67,9 @@ fn open_owner_only(path: &Path) -> Result<File, H5iError> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(path).map_err(|e| H5iError::with_path(e, path))?;
+    let file = options
+        .open(path)
+        .map_err(|e| H5iError::with_path(e, path))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -71,6 +80,7 @@ fn open_owner_only(path: &Path) -> Result<File, H5iError> {
     Ok(file)
 }
 
+#[cfg(feature = "native")]
 impl Sink for JsonlSink {
     fn append(&self, record: &RequestRecord) -> Result<(), H5iError> {
         let line = serde_json::to_string(record)?;
@@ -122,10 +132,7 @@ impl MemorySink {
     /// numbers are taken before the append, so append order and sequence order
     /// can differ and a count would drift.
     pub fn high_water(&self) -> Option<u64> {
-        self.records()
-            .iter()
-            .map(|r| r.seq)
-            .max()
+        self.records().iter().map(|r| r.seq).max()
     }
 
     /// Sequence numbers written after `mark`, deduplicated and in order.
@@ -175,8 +182,10 @@ impl Sink for MemorySink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native")]
     use std::io::Read;
 
+    #[cfg(feature = "native")]
     #[test]
     fn jsonl_sink_writes_one_parseable_line_per_record() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -264,11 +273,13 @@ pub struct ActionOutcome {
 }
 
 /// Where the resident session records what it was asked to do.
+#[cfg(feature = "native")]
 pub struct ActionLog {
     file: Mutex<File>,
     seq: AtomicU64,
 }
 
+#[cfg(feature = "native")]
 impl ActionLog {
     pub fn create(path: &Path) -> Result<Self, H5iError> {
         if let Some(parent) = path.parent()
@@ -355,7 +366,7 @@ impl ActionLog {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod action_log_tests {
     use super::*;
 

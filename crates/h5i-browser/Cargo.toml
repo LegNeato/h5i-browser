@@ -7,14 +7,24 @@ description = "h5i browser: a lightweight visual browser engine for coding agent
 # A library only.
 
 [features]
-default = ["identity"]
+default = ["identity", "native", "javascript", "cli", "git-errors"]
+
+# Native transports are optional so embedded runtimes can supply their own Broker.
+native = [
+    "dep:reqwest", "dep:rustls", "dep:webpki-roots", "dep:h2", "dep:http",
+    "dep:bytes", "dep:tokio", "dep:tokio-rustls", "dep:sha1", "dep:base64",
+    "dep:flate2", "dep:brotli", "dep:ruzstd", "dep:libc",
+]
+javascript = ["dep:boa_engine", "dep:boa_gc", "dep:portable-atomic", "dep:base64"]
+cli = ["native", "javascript", "dep:clap"]
+git-errors = ["h5i-error/git"]
 
 # Browser identities: `--identity`, the coherence validator, and the one object the header layer
 # and the script realm both answer from.
 identity = ["dep:toml"]
 
 [dependencies]
-h5i-error = { path = "../h5i-error" }
+h5i-error = { path = "../h5i-error", default-features = false }
 # The receipt row and the stored message, as data. Small on purpose: the
 # readers of both (the websec plugin, recon) depend on that crate and not on
 # this one, so reading a log never links a browser engine.
@@ -22,8 +32,7 @@ h5i-wire = { path = "../h5i-wire" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# The engine, assembled rather than written: Blitz owns the DOM and drives
-# Stylo for CSS; vello_cpu rasterises on the CPU because a box has no GPU.
+# Blitz owns the DOM and drives Stylo for CSS. Vello supplies the Rust rasterizer.
 # Pinned exactly: Blitz is beta and its inter-crate versions are `=` pinned
 # upstream, so a range here would only invent skew.
 blitz-dom = { version = "=0.3.0-beta.1", default-features = false }
@@ -90,24 +99,24 @@ encoding_rs = "0.8"
 
 # The atomic boa's job-cancellation token is built from. Named here only so the
 # token can be held in a struct field; it must be the same type boa hands back.
-portable-atomic = "1"
+portable-atomic = { version = "1", optional = true }
 
 # Blocking client on purpose: `NetProvider::fetch` is called synchronously
 # from Blitz's parse/resolve, there is no runtime to await on, and a browser
 # that fetches one subresource at a time is a browser whose receipt order is
 # its request order.
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { optional = true, version = "0.12", default-features = false, features = [
     "blocking",
     "rustls-tls",
 ] }
 
-clap = { version = "4.5.60", features = ["derive"] }
+clap = { optional = true, version = "4.5.60", features = ["derive"] }
 
 # The live view speaks RFC 6455 directly (see `ws`): one handshake, four
 # opcodes, no extensions. These are the same two crates h5i-core uses for the
 # client half, kept at the same versions so the workspace holds one copy.
-sha1 = "0.10"
-base64 = "0.22"
+sha1 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
 # `annex-b` is the standard's own name for "the legacy behaviour every browser
 # actually implements": `String.prototype.substr`, the HTML string methods, and
 # the sloppy-mode parser rules including HTML-like comments in scripts. Leaving
@@ -117,32 +126,30 @@ base64 = "0.22"
 # icu requirements clashed with parley's, and `scripts/check_boa_release.sh`
 # failed CI the moment 0.22.0 resolved the clash — which is exactly what it
 # was written to do.
-boa_engine = { version = "0.22.0", default-features = false, features = ["annex-b", "intl_bundled", "temporal"] }
-boa_gc = "0.22.0"
+boa_engine = { optional = true, version = "0.22.0", default-features = false, features = ["annex-b", "intl_bundled", "temporal"] }
+boa_gc = { version = "0.22.0", optional = true }
 # The public suffix list, compiled in as a static table rather than fetched.
 psl = "2.1.226"
 # TLS for `wss://`, and only for that.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-webpki-roots = "1.0"
+rustls = { optional = true, version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = { version = "1.0", optional = true }
 # The `h5i browser grpc` transport: an HTTP/2 client for gRPC. All already in
 # the tree via reqwest, so these add no package.
-h2 = "0.4"
-http = "1"
-bytes = "1"
-tokio = { version = "1", features = ["rt", "net", "io-util", "time"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+h2 = { version = "0.4", optional = true }
+http = { version = "1", optional = true }
+bytes = { version = "1", optional = true }
+tokio = { optional = true, version = "1", features = ["rt", "net", "io-util", "time"] }
+tokio-rustls = { optional = true, version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 # Compression, decoded here rather than by the HTTP client.
-flate2 = "1.1.9"
-brotli = { version = "8.0.4", default-features = false, features = ["std"] }
+flate2 = { version = "1.1.9", optional = true }
+brotli = { optional = true, version = "8.0.4", default-features = false, features = ["std"] }
 # zstd, which Chromium asks for and CDNs answer with: proxy-captured bodies and
 # replays of Chromium's requests arrive in it. Pure Rust, decode only.
-ruzstd = { version = "0.8.3", default-features = false, features = ["std"] }
+ruzstd = { optional = true, version = "0.8.3", default-features = false, features = ["std"] }
 
 # The identity digest, which goes in the session record beside the policy's,
-# and the message store's content addressing. The same crate h5i-core digests a
-# policy with, so two digests written by two halves of one product are the same
-# kind of thing. Not optional: `capture` is in every build, because a capability
-# gated at build time is one an agent cannot ask for at run time.
+# and the message store's content addressing. Multipart boundary selection also
+# uses this digest when native capture support is disabled.
 sha2 = { workspace = true }
 
 # Browser identities are written as TOML, because that is what every other
@@ -158,10 +165,26 @@ tempfile = "3.8"
 [[bench]]
 name = "read"
 harness = false
+required-features = ["native"]
 
 # `_exit`, for one call: the renderer's "my broker is gone" stop. See
 # `BrokerClient::over` in `ipc.rs` for why `std::process::exit` is not enough
 # there. Unix only, because the renderer is only ever spawned over a socket
 # pair, which is a unix path already.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.186"
+libc = { version = "0.2.186", optional = true }
+
+[[test]]
+name = "paint"
+path = "tests/paint.rs"
+required-features = ["native"]
+
+[[test]]
+name = "corpus"
+path = "tests/corpus.rs"
+required-features = ["native", "javascript"]
+
+[[example]]
+name = "perf"
+path = "examples/perf.rs"
+required-features = ["native", "javascript"]

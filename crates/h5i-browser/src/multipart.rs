@@ -56,23 +56,81 @@ pub fn boundary_of(content_type: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-/// A boundary no body will contain by accident.
+/// Generate a random boundary without inspecting a body.
 ///
-/// The engine's own, always, rather than the one that arrived: re-using an
-/// incoming boundary means a caller who pastes that boundary into a part's data
-/// splits the message, which is a way to send something other than what was
-/// asked for. Fresh and random costs nothing.
+/// Prefer [`boundary_for`] when the parts are available. It verifies that the
+/// selected boundary cannot split their content.
+///
+/// # Panics
+///
+/// Panics if the operating system cannot supply entropy. Use
+/// [`try_fresh_boundary`] to handle that failure.
 pub fn fresh_boundary() -> String {
+    try_fresh_boundary().expect("the operating system could not supply multipart boundary entropy")
+}
+
+/// Generate a random boundary and report an entropy failure to the caller.
+pub fn try_fresh_boundary() -> Result<String, getrandom::Error> {
+    random_boundary_with(getrandom::getrandom)
+}
+
+fn random_boundary_with(
+    fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
+) -> Result<String, getrandom::Error> {
     let mut bytes = [0u8; 16];
-    // The same source the script realm's `crypto.getRandomValues` uses. A
-    // predictable boundary is not a security hole here, but a colliding one is
-    // a corrupt request, and this is the cheapest way to never collide.
-    let _ = getrandom::getrandom(&mut bytes);
+    fill(&mut bytes)?;
     let mut out = String::from("----h5i");
     for byte in bytes {
         let _ = write!(out, "{byte:02x}");
     }
-    out
+    Ok(out)
+}
+
+/// Select a boundary absent from every part's content and headers.
+///
+/// The content digest provides a deterministic starting point. The explicit
+/// collision check makes correctness independent of entropy and hash uniqueness.
+pub fn boundary_for(parts: &[Part]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for part in parts {
+        digest.update(part.name.as_bytes());
+        digest.update(&part.data);
+    }
+    let mut prefix = String::from("----h5i");
+    for byte in &digest.finalize()[..16] {
+        let _ = write!(prefix, "{byte:02x}");
+    }
+    choose_boundary(parts, &prefix)
+}
+
+fn choose_boundary(parts: &[Part], prefix: &str) -> String {
+    let mut counter = 0usize;
+    loop {
+        let candidate = format!("{prefix}-{counter:x}");
+        let needle = candidate.as_bytes();
+        let contains = |bytes: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+        let collision = parts.iter().any(|part| {
+            contains(part.name.as_bytes())
+                || contains(&part.data)
+                || part
+                    .filename
+                    .as_ref()
+                    .is_some_and(|name| contains(name.as_bytes()))
+                || part
+                    .content_type
+                    .as_ref()
+                    .is_some_and(|kind| contains(kind.as_bytes()))
+                || part
+                    .extra
+                    .iter()
+                    .any(|(name, value)| contains(name.as_bytes()) || contains(value.as_bytes()))
+        });
+        if !collision {
+            return candidate;
+        }
+        counter += 1;
+    }
 }
 
 /// Split a multipart body into its parts.
@@ -161,7 +219,12 @@ fn parameter(header: &str, key: &str) -> Option<String> {
                 // Quoted: to the closing quote.
                 Some(quoted) => quoted.split('"').next().unwrap_or_default().to_string(),
                 // Bare: to the next `;`, trimmed.
-                None => value.split(';').next().unwrap_or_default().trim().to_string(),
+                None => value
+                    .split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
             });
         }
         rest = &rest[at + key.len()..];
@@ -207,6 +270,52 @@ pub fn serialize(parts: &[Part], boundary: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn boundary_generation_reports_entropy_failure() {
+        let error = random_boundary_with(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert_eq!(error, getrandom::Error::UNSUPPORTED);
+    }
+
+    #[test]
+    fn boundary_generation_uses_supplied_entropy() {
+        let boundary = random_boundary_with(|bytes| {
+            bytes.fill(0xab);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(boundary, format!("----h5i{}", "ab".repeat(16)));
+    }
+
+    #[test]
+    fn a_checked_boundary_skips_payload_and_header_collisions() {
+        let parts = vec![Part {
+            name: "----test-0".into(),
+            filename: Some("----test-1".into()),
+            content_type: Some("----test-2".into()),
+            extra: vec![("----test-3".into(), "----test-4".into())],
+            data: b"----test-5".to_vec(),
+        }];
+        assert_eq!(choose_boundary(&parts, "----test"), "----test-6");
+        let boundary = boundary_for(&parts);
+        assert!(boundary.len() <= 70);
+        assert_eq!(parse(&serialize(&parts, &boundary), &boundary), Some(parts));
+    }
+
+    #[test]
+    fn checked_boundaries_are_stable_without_entropy() {
+        let parts = vec![Part {
+            name: "amount".into(),
+            data: b"42".to_vec(),
+            ..Part::default()
+        }];
+        assert_eq!(boundary_for(&parts), boundary_for(&parts));
+        let boundary = boundary_for(&[]);
+        assert_eq!(
+            parse(&serialize(&[], &boundary), &boundary),
+            Some(Vec::new())
+        );
+    }
+
     fn sample() -> Vec<u8> {
         let mut body = Vec::new();
         body.extend_from_slice(b"------abc\r\n");
@@ -228,15 +337,26 @@ mod tests {
     fn no_arrangement_of_these_bytes_makes_the_parser_panic() {
         // Exactly the bytes the framing is made of, where the edges are.
         let alphabet: &[&[u8]] = &[
-            b"------abc", b"--", b"\r\n", b"\n", b"\r", b"a", b":", b" ",
-            b"Content-Disposition: form-data; name=\"a\"", b"filename=\"f\"", b"",
+            b"------abc",
+            b"--",
+            b"\r\n",
+            b"\n",
+            b"\r",
+            b"a",
+            b":",
+            b" ",
+            b"Content-Disposition: form-data; name=\"a\"",
+            b"filename=\"f\"",
+            b"",
         ];
         // A fixed stride through the space, rather than all 11^6 of it.
         let mut seed: u64 = 0x243f_6a88_85a3_08d3;
         for _ in 0..200_000 {
             let mut body = Vec::new();
             for _ in 0..6 {
-                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 body.extend_from_slice(alphabet[(seed >> 33) as usize % alphabet.len()]);
             }
             // Both the boundary it declares and one it does not.
@@ -279,7 +399,9 @@ mod tests {
     fn an_unquoted_disposition_parameter_is_read_like_a_quoted_one() {
         let mut body = Vec::new();
         body.extend_from_slice(b"------abc\r\n");
-        body.extend_from_slice(b"Content-Disposition: form-data; name=avatar; filename=cat.png\r\n");
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=avatar; filename=cat.png\r\n",
+        );
         body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
         body.extend_from_slice(b"PNGDATA");
         body.extend_from_slice(b"\r\n------abc--\r\n");
@@ -325,8 +447,7 @@ mod tests {
         assert_eq!(parts[1].filename.as_deref(), Some("cat.png"));
         assert_eq!(parts[1].content_type.as_deref(), Some("image/png"));
         assert_eq!(
-            parts[1].data,
-            b"\x89PNG\r\n\x1a\n binary",
+            parts[1].data, b"\x89PNG\r\n\x1a\n binary",
             "binary data survives, CRLFs included"
         );
     }
@@ -352,7 +473,11 @@ mod tests {
             boundary_of("multipart/form-data; boundary=\"----abc\"; charset=utf-8").as_deref(),
             Some("----abc")
         );
-        assert_eq!(boundary_of("application/json"), None, "not multipart at all");
+        assert_eq!(
+            boundary_of("application/json"),
+            None,
+            "not multipart at all"
+        );
         assert_eq!(
             boundary_of("multipart/form-data"),
             None,

@@ -17,7 +17,7 @@ pub mod model;
 pub mod render_snapshot;
 pub mod text_arena;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod equivalence;
 
 pub use build::ReadTree;
@@ -47,8 +47,7 @@ impl ReadTree {
                     depth: node.depth as usize,
                     role: node.role.as_str(node.level).to_string(),
                     text: self.text(node.name).to_string(),
-                    reference: (node.ref_ordinal != 0)
-                        .then(|| format!("e{}", node.ref_ordinal)),
+                    reference: (node.ref_ordinal != 0).then(|| format!("e{}", node.ref_ordinal)),
                     href: (!node.href.is_empty()).then(|| self.text(node.href).to_string()),
                 })
                 .collect(),

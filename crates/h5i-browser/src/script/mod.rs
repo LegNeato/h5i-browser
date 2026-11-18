@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use std::time::Duration;
 
-use boa_engine::{js_string, Context, JsString, JsValue, Module, Source};
+use boa_engine::{Context, JsString, JsValue, Module, Source, js_string};
 
 use crate::engine::Dom;
 use host::{ConsoleLine, Host, HostHandle};
@@ -227,8 +227,9 @@ impl boa_engine::context::HostHooks for Hooks {
     fn local_timezone_offset_seconds(&self, unix_time_seconds: i64) -> i32 {
         match self.offset_seconds {
             Some(offset) => offset,
-            None => boa_engine::context::DefaultHooks
-                .local_timezone_offset_seconds(unix_time_seconds),
+            None => {
+                boa_engine::context::DefaultHooks.local_timezone_offset_seconds(unix_time_seconds)
+            }
         }
     }
 
@@ -438,7 +439,6 @@ pub struct Script {
     /// What building this realm cost, by phase. See [`RealmCost`].
     cost: RealmCost,
 }
-
 
 thread_local! {
     /// Diagnostic accumulators for one settle, in the order the loop runs them.
@@ -665,9 +665,9 @@ impl Script {
                     // records, which is the whole reason for being on 0.21.
                     let text = boa_engine::JsError::from_opaque(reason).to_string();
                     crate::script::host::push_console(
-                &mut self.host.console.borrow_mut(),
-                ConsoleLine::engine("error", format!("{name}: module failed: {text}")),
-            );
+                        &mut self.host.console.borrow_mut(),
+                        ConsoleLine::engine("error", format!("{name}: module failed: {text}")),
+                    );
                 }
             }
         }
@@ -808,7 +808,9 @@ impl Script {
                 let wrapped = format!(
                     "(() => {{ try {{ return !!({expr}); }} catch (e) {{ return false; }} }})()"
                 );
-                self.eval_value(&wrapped).map(|v| v == "true").unwrap_or(false)
+                self.eval_value(&wrapped)
+                    .map(|v| v == "true")
+                    .unwrap_or(false)
             }
         }
     }
@@ -938,7 +940,6 @@ impl Script {
                 }
 
                 if self.pending_timers() == 0 {
-
                     // A reply that arrived in *this* pass resolved a promise,
                     // and the continuation it queued has not run yet. Returning
                     // here would report the page settled with its own `.then`
@@ -1039,14 +1040,15 @@ impl Script {
     ///
     /// Returns whether the deadline fired, so the page can be told it was cut
     /// off rather than left to look merely thin.
-    fn with_job_deadline<T>(&mut self, budget: Duration, body: impl FnOnce(&mut Self) -> T) -> (T, bool) {
+    fn with_job_deadline<T>(
+        &mut self,
+        budget: Duration,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> (T, bool) {
         let cancel = self.cancel.clone();
         // A condition variable rather than a polled flag, because this thread is *joined*:
         // whatever it is still doing when the body finishes, the page waits for.
-        let done = std::sync::Arc::new((
-            std::sync::Mutex::new(false),
-            std::sync::Condvar::new(),
-        ));
+        let done = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
         let watching = done.clone();
         let deadline = std::time::Instant::now() + budget;
 
@@ -1086,8 +1088,7 @@ impl Script {
 
         // Boa clears the flag itself when it acts on it, but a deadline that
         // fired after the last job would leave it set for the next call.
-        self.cancel
-            .store(false, portable_atomic::Ordering::Relaxed);
+        self.cancel.store(false, portable_atomic::Ordering::Relaxed);
         (out, fired)
     }
 
@@ -1282,11 +1283,7 @@ impl Script {
     /// away could only ever guess, and guessing wrong in either direction is
     /// visible: navigate anyway and the page loses the state its handler just
     /// built; never navigate and an ordinary form stops working.
-    pub fn dispatch_reporting(
-        &mut self,
-        node_id: usize,
-        event_type: &str,
-    ) -> Result<bool, String> {
+    pub fn dispatch_reporting(&mut self, node_id: usize, event_type: &str) -> Result<bool, String> {
         let source = Self::dispatch_source(node_id, event_type);
         // `true` when there was no such node either: nothing prevented anything.
         let value = self.eval_value(&format!("({source} !== false)"))?;
@@ -1355,9 +1352,9 @@ impl Script {
     pub fn note_error(&self, text: &str) {
         self.name_missing_global(text);
         crate::script::host::push_console(
-                &mut self.host.console.borrow_mut(),
-                ConsoleLine::engine("error", text.to_string()),
-            );
+            &mut self.host.console.borrow_mut(),
+            ConsoleLine::engine("error", text.to_string()),
+        );
     }
 
     /// Record the identifier behind a `ReferenceError` as an API we lack.
@@ -1386,7 +1383,11 @@ impl Script {
         };
         if let Some(first) = first {
             let and_others = if count > 1 {
-                format!(" (and {} other script{})", count - 1, if count > 2 { "s" } else { "" })
+                format!(
+                    " (and {} other script{})",
+                    count - 1,
+                    if count > 2 { "s" } else { "" }
+                )
             } else {
                 String::new()
             };
@@ -1469,5 +1470,5 @@ impl Script {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;

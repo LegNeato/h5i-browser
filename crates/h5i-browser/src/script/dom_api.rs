@@ -1,6 +1,6 @@
 //! The native primitives, and nothing above them.
 
-use boa_engine::{js_string, Context, JsArgs, JsError, JsResult, JsValue, NativeFunction};
+use boa_engine::{Context, JsArgs, JsError, JsResult, JsValue, NativeFunction, js_string};
 
 use super::host::{ConsoleLine, HostHandle};
 
@@ -233,82 +233,7 @@ fn query_all(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
     Ok(array.into())
 }
 
-/// Every node under `scope` matching `selector`, in document order.
-pub(crate) fn matches_within(
-    doc: &blitz_dom::BaseDocument,
-    scope: usize,
-    selector: &str,
-) -> Vec<usize> {
-    let Ok(list) = doc.try_parse_selector_list(selector) else {
-        return Vec::new();
-    };
-
-    if scope == 0 {
-        let mut found = smallvec::SmallVec::<[&blitz_dom::Node; 128]>::new();
-        style::dom_apis::query_selector::<&blitz_dom::Node, style::dom_apis::QueryAll>(
-            doc.root_node(),
-            &list,
-            &mut found,
-            style::dom_apis::MayUseInvalidation::Yes,
-        );
-        return found.into_iter().map(|node| node.id).collect();
-    }
-
-    let mut out = Vec::new();
-    collect_matches(doc, scope, &list, &mut out);
-    out
-}
-
-/// The first match in document order, stopping there.
-///
-/// The same matcher and the same selector list as [`matches_within`], asked a
-/// narrower question. Stylo's `QueryFirst` sets
-/// `should_stop_after_first_match`, so a selector whose target is early in the
-/// document costs a fraction of the full walk; one whose target is last costs
-/// the same. Document-scoped only, which is the shape every caller needs.
-pub(crate) fn first_match_in_document(
-    doc: &blitz_dom::BaseDocument,
-    selector: &str,
-) -> Option<usize> {
-    let list = doc.try_parse_selector_list(selector).ok()?;
-    let mut found: Option<&blitz_dom::Node> = None;
-    style::dom_apis::query_selector::<&blitz_dom::Node, style::dom_apis::QueryFirst>(
-        doc.root_node(),
-        &list,
-        &mut found,
-        style::dom_apis::MayUseInvalidation::Yes,
-    );
-    found.map(|node| node.id)
-}
-
-/// Depth-first over the descendants of `id`, in document order.
-///
-/// The scope itself is deliberately not tested: `element.querySelector` is
-/// defined to search inside the element, not to return it.
-fn collect_matches(
-    doc: &blitz_dom::BaseDocument,
-    id: usize,
-    list: &selectors::SelectorList<style::selector_parser::SelectorImpl>,
-    out: &mut Vec<usize>,
-) {
-    let Some(node) = doc.get_node(id) else { return };
-    for child in node.children.clone() {
-        if let Some(child_node) = doc.get_node(child)
-            && child_node.is_element()
-                // Standards mode: this engine parses HTML5 and never emulates
-                // the quirks the flag exists to preserve.
-                && style::dom_apis::element_matches(
-                    &child_node,
-                    list,
-                    style::context::QuirksMode::NoQuirks,
-                )
-
-        {
-            out.push(child);
-        }
-        collect_matches(doc, child, list, out);
-    }
-}
+use crate::dom_query::matches_within;
 
 fn get_text(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let id = arg_id(args, 0, context)?;
@@ -389,7 +314,9 @@ fn children(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
     let host = host(context)?;
     let ids: Vec<usize> = {
         let doc = host.dom.borrow();
-        doc.get_node(id).map(|n| n.children.clone()).unwrap_or_default()
+        doc.get_node(id)
+            .map(|n| n.children.clone())
+            .unwrap_or_default()
     };
     // Built in one step rather than pushed element by element: `push` runs the
     // whole of `Array.prototype.push` per child, reading and writing `length`
@@ -723,7 +650,11 @@ fn insert_before(_this: &JsValue, args: &[JsValue], context: &mut Context) -> Js
         {
             return Err(hierarchy_request("inserting a node"));
         }
-        if doc.get_node(anchor).map(|node| node.parent.is_none()).unwrap_or(true) {
+        if doc
+            .get_node(anchor)
+            .map(|node| node.parent.is_none())
+            .unwrap_or(true)
+        {
             return Err(boa_engine::JsNativeError::error()
                 .with_message(
                     "insertBefore: the reference node has no parent, so there is \
@@ -831,11 +762,8 @@ fn set_attr(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
     let name = attr_name_for(&host.dom.borrow(), id, &raw);
     guard_mutation(&host, &format!("setting `{name}`"), || {
         let mut doc = host.dom.borrow_mut();
-        let qual = blitz_dom::QualName::new(
-            None,
-            blitz_dom::ns!(),
-            blitz_dom::LocalName::from(&*name),
-        );
+        let qual =
+            blitz_dom::QualName::new(None, blitz_dom::ns!(), blitz_dom::LocalName::from(&*name));
         let mut mutator = doc.mutate();
         mutator.set_attribute(id, qual, &value);
         drop(mutator);
@@ -852,11 +780,8 @@ fn remove_attr(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
     let name = attr_name_for(&host.dom.borrow(), id, &raw);
     {
         let mut doc = host.dom.borrow_mut();
-        let qual = blitz_dom::QualName::new(
-            None,
-            blitz_dom::ns!(),
-            blitz_dom::LocalName::from(&*name),
-        );
+        let qual =
+            blitz_dom::QualName::new(None, blitz_dom::ns!(), blitz_dom::LocalName::from(&*name));
         let mut mutator = doc.mutate();
         mutator.clear_attribute(id, qual);
         drop(mutator);
@@ -946,7 +871,11 @@ fn unsupported(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
 }
 
 /// `fetch`, routed through the same broker as everything else.
-fn element_from_point(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn element_from_point(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let x = args
         .first()
         .unwrap_or(&JsValue::undefined())
@@ -1203,14 +1132,22 @@ fn arg_entries(
     let Some(object) = args.get(index).and_then(JsValue::as_object) else {
         return Ok(out);
     };
-    let length = (object.get(js_string!("length"), context)?.to_number(context)? as usize)
+    let length = (object
+        .get(js_string!("length"), context)?
+        .to_number(context)? as usize)
         .min(MAX_FORM_ENTRIES);
     for at in 0..length {
         let Some(pair) = object.get(at as u32, context)?.as_object() else {
             continue;
         };
-        let name = pair.get(0u32, context)?.to_string(context)?.to_std_string_escaped();
-        let value = pair.get(1u32, context)?.to_string(context)?.to_std_string_escaped();
+        let name = pair
+            .get(0u32, context)?
+            .to_string(context)?
+            .to_std_string_escaped();
+        let value = pair
+            .get(1u32, context)?
+            .to_string(context)?
+            .to_std_string_escaped();
         out.push((name, value));
     }
     Ok(out)
@@ -1318,10 +1255,8 @@ fn identity(_this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResu
 fn run_script(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let code = arg_string(args, 0, context).unwrap_or_default();
     let name = arg_string(args, 1, context).unwrap_or_default();
-    let source = boa_engine::Source::from_reader(
-        code.as_bytes(),
-        Some(std::path::Path::new(&name)),
-    );
+    let source =
+        boa_engine::Source::from_reader(code.as_bytes(), Some(std::path::Path::new(&name)));
     context.eval(source)
 }
 
@@ -1356,7 +1291,9 @@ fn arg_body(args: &[JsValue], at: usize, context: &mut Context) -> Vec<u8> {
             return data.to_vec();
         }
     }
-    arg_string(args, at, context).unwrap_or_default().into_bytes()
+    arg_string(args, at, context)
+        .unwrap_or_default()
+        .into_bytes()
 }
 
 fn fetch_start(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
@@ -1423,8 +1360,7 @@ fn fetch_start(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
                 .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
                 .map(|(_, value)| value.clone())
                 .or_else(|| {
-                    (!body.is_empty())
-                        .then(|| "application/x-www-form-urlencoded".to_string())
+                    (!body.is_empty()).then(|| "application/x-www-form-urlencoded".to_string())
                 }),
             body,
             headers,
@@ -1583,10 +1519,7 @@ fn fetch_pending(_this: &JsValue, _args: &[JsValue], context: &mut Context) -> J
 }
 
 /// The shape script sees for one finished request.
-fn reply_value(
-    outcome: crate::net::FetchOutcome,
-    context: &mut Context,
-) -> JsResult<JsValue> {
+fn reply_value(outcome: crate::net::FetchOutcome, context: &mut Context) -> JsResult<JsValue> {
     if let Some(error) = outcome.error {
         // A refusal is an answer. The promise rejects and the page sees it,
         // rather than the engine pretending the request never happened.
@@ -1602,14 +1535,23 @@ fn reply_value(
     let exact = std::str::from_utf8(&outcome.body).is_ok();
     let text = String::from_utf8_lossy(&outcome.body).into_owned();
     let reply = boa_engine::object::ObjectInitializer::new(context).build();
-    reply.set(js_string!("ok"), (200..300).contains(&status), false, context)?;
+    reply.set(
+        js_string!("ok"),
+        (200..300).contains(&status),
+        false,
+        context,
+    )?;
     reply.set(js_string!("status"), status as f64, false, context)?;
     // Empty for an opaque response, as the Fetch spec requires. The body, the
     // headers and the status are all withheld from a `no-cors` read; handing
     // back where the redirect chain *ended* gave the same answer in one field
     // — the login-state oracle (`/login` versus `/dashboard`), and whatever a
     // victim server puts in a `Location`.
-    let seen_url = if outcome.opaque { String::new() } else { outcome.final_url.to_string() };
+    let seen_url = if outcome.opaque {
+        String::new()
+    } else {
+        outcome.final_url.to_string()
+    };
     reply.set(js_string!("url"), js_string!(seen_url), false, context)?;
     reply.set(js_string!("text"), js_string!(text), false, context)?;
     // Only when the decode lost something. A body that is valid UTF-8 encodes
@@ -1644,7 +1586,6 @@ fn reply_error(message: &str, context: &mut Context) -> JsResult<JsValue> {
     Ok(reply.into())
 }
 
-
 /// The serialised markup *inside* a node.
 ///
 /// Real serialisation, not the text content. The previous version returned
@@ -1667,8 +1608,8 @@ fn inner_html(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRes
 
 /// Elements that never have children or a closing tag.
 const VOID_ELEMENTS: [&str; 14] = [
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 
 /// Serialise one node and its subtree.
@@ -1704,7 +1645,9 @@ fn serialise(
             }
             Step::Node(id) => id,
         };
-        let Some(node) = doc.get_node(id) else { continue };
+        let Some(node) = doc.get_node(id) else {
+            continue;
+        };
 
         // Children are pushed in reverse so they come off in document order.
         let push_children = |stack: &mut Vec<Step<'_>>| {
@@ -1803,7 +1746,9 @@ fn scroll_to_node(_this: &JsValue, args: &[JsValue], context: &mut Context) -> J
     let mut current = Some(id);
     for _ in 0..256 {
         let Some(node_id) = current else { break };
-        let Some(node) = doc.get_node(node_id) else { break };
+        let Some(node) = doc.get_node(node_id) else {
+            break;
+        };
         y += node.final_layout.location.y;
         current = node.parent;
     }
@@ -2045,7 +1990,9 @@ fn rect(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<Js
     let mut current = Some(id);
     for _ in 0..256 {
         let Some(node_id) = current else { break };
-        let Some(node) = doc.get_node(node_id) else { break };
+        let Some(node) = doc.get_node(node_id) else {
+            break;
+        };
         x += node.final_layout.location.x;
         y += node.final_layout.location.y;
         current = node.parent;
@@ -2130,9 +2077,9 @@ fn computed_style(_this: &JsValue, args: &[JsValue], context: &mut Context) -> J
         // value is its longhands re-serialised, and getting that subtly wrong is
         // worse than not answering, because a caller comparing two `border`
         // strings would be told two different borders match.
-        Ok(PropertyId::NonCustom(id)) => id
-            .as_longhand()
-            .map(|longhand| styles.computed_value_to_string(PropertyDeclarationId::Longhand(longhand))),
+        Ok(PropertyId::NonCustom(id)) => id.as_longhand().map(|longhand| {
+            styles.computed_value_to_string(PropertyDeclarationId::Longhand(longhand))
+        }),
         // `--custom-property`, which is how real pages theme themselves, so this
         // was a live gap rather than an obscure one.
         //
@@ -2147,7 +2094,10 @@ fn computed_style(_this: &JsValue, args: &[JsValue], context: &mut Context) -> J
             let mut index = 0usize;
             while let Some((key, value)) = customs.property_at(index) {
                 if *key == name {
-                    answer = value.as_ref().map(|v| v.to_css_string()).unwrap_or_default();
+                    answer = value
+                        .as_ref()
+                        .map(|v| v.to_css_string())
+                        .unwrap_or_default();
                     break;
                 }
                 index += 1;
@@ -2203,7 +2153,9 @@ fn collect_text_content(doc: &blitz_dom::BaseDocument, id: usize, out: &mut Stri
     // Reversed on the way in so they come off in document order.
     let mut stack: Vec<usize> = root.children.iter().rev().copied().collect();
     while let Some(next) = stack.pop() {
-        let Some(node) = doc.get_node(next) else { continue };
+        let Some(node) = doc.get_node(next) else {
+            continue;
+        };
         match &node.data {
             blitz_dom::NodeData::Text(text) => out.push_str(&text.content),
             _ => stack.extend(node.children.iter().rev().copied()),
@@ -2222,11 +2174,7 @@ enum TextSegment {
     HardBreak,
 }
 
-fn collect_rendered_text(
-    doc: &blitz_dom::BaseDocument,
-    id: usize,
-    out: &mut Vec<TextSegment>,
-) {
+fn collect_rendered_text(doc: &blitz_dom::BaseDocument, id: usize, out: &mut Vec<TextSegment>) {
     use style::properties::longhands::white_space_collapse::computed_value::T as Collapse;
     let Some(node) = doc.get_node(id) else { return };
     // The text children take their whitespace rules from *this* element's
@@ -2237,13 +2185,18 @@ fn collect_rendered_text(
         .map(|s| s.get_inherited_text().clone_white_space_collapse())
         .unwrap_or(Collapse::Collapse);
     for child in node.children.iter() {
-        let Some(kid) = doc.get_node(*child) else { continue };
+        let Some(kid) = doc.get_node(*child) else {
+            continue;
+        };
         match &kid.data {
             blitz_dom::NodeData::Text(text) => {
                 let raw = text.content.replace("\r\n", "\n").replace('\r', "\n");
                 match collapse {
                     Collapse::Preserve | Collapse::BreakSpaces => {
-                        out.push(TextSegment::Text { content: raw, preserved: true });
+                        out.push(TextSegment::Text {
+                            content: raw,
+                            preserved: true,
+                        });
                     }
                     Collapse::PreserveBreaks => {
                         // `pre-line`: spaces collapse, the newlines stay real.
@@ -2263,7 +2216,10 @@ fn collect_rendered_text(
                         if in_spaces {
                             content.push(' ');
                         }
-                        out.push(TextSegment::Text { content, preserved: true });
+                        out.push(TextSegment::Text {
+                            content,
+                            preserved: true,
+                        });
                     }
                     Collapse::Collapse => {
                         let mut content = String::with_capacity(raw.len());
@@ -2282,7 +2238,10 @@ fn collect_rendered_text(
                         if in_spaces {
                             content.push(' ');
                         }
-                        out.push(TextSegment::Text { content, preserved: false });
+                        out.push(TextSegment::Text {
+                            content,
+                            preserved: false,
+                        });
                     }
                 }
             }
@@ -2343,7 +2302,10 @@ fn assemble_inner_text(segments: Vec<TextSegment>) -> String {
                 if piece.is_empty() {
                     continue;
                 }
-                if !preserved && (piece.trim() == "") && (pending_block || pending_hard > 0 || result.is_empty()) {
+                if !preserved
+                    && (piece.trim() == "")
+                    && (pending_block || pending_hard > 0 || result.is_empty())
+                {
                     // Whitespace-only filler beside a break or at the start
                     // never renders.
                     continue;
@@ -2391,10 +2353,12 @@ fn assemble_inner_text(segments: Vec<TextSegment>) -> String {
 /// The canonical name for an encoding label, or null if it is not one.
 fn encoding_for(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let label = arg_string(args, 0, context)?;
-    Ok(match encoding_rs::Encoding::for_label(label.trim().as_bytes()) {
-        Some(encoding) => js_string!(encoding.name().to_ascii_lowercase()).into(),
-        None => JsValue::null(),
-    })
+    Ok(
+        match encoding_rs::Encoding::for_label(label.trim().as_bytes()) {
+            Some(encoding) => js_string!(encoding.name().to_ascii_lowercase()).into(),
+            None => JsValue::null(),
+        },
+    )
 }
 
 /// Decode bytes as the named encoding.
@@ -2463,7 +2427,11 @@ fn rewrite_query(href: &str, encoding: &'static encoding_rs::Encoding) -> String
 }
 
 /// What the document is written in, as the canonical label.
-fn document_encoding(_this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn document_encoding(
+    _this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let host = host(context)?;
     let name = host.encoding.borrow().name().to_string();
     Ok(js_string!(name).into())
@@ -2481,11 +2449,14 @@ fn guard_mutation(host: &HostHandle, what: &str, body: impl FnOnce()) {
         let first = detail.lines().next().unwrap_or("").to_string();
         super::host::push_console(
             &mut host.console.borrow_mut(),
-            ConsoleLine::engine("error", format!("{what} was refused by the layout engine: {first}")),
+            ConsoleLine::engine(
+                "error",
+                format!("{what} was refused by the layout engine: {first}"),
+            ),
         );
-        host.unsupported
-            .borrow_mut()
-            .record(&format!("{what} on content the layout engine cannot resolve"));
+        host.unsupported.borrow_mut().record(&format!(
+            "{what} on content the layout engine cannot resolve"
+        ));
     }
 }
 
@@ -2589,7 +2560,11 @@ fn supports_css(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
 }
 
 /// One declaration, parsed and serialised back: the CSSOM "specified value".
-fn serialize_css_value(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn serialize_css_value(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let property = arg_string(args, 0, context)?;
     let value = arg_string(args, 1, context)?;
 
@@ -2632,8 +2607,13 @@ fn serialize_css_value(_this: &JsValue, args: &[JsValue], context: &mut Context)
     let mut source = SourcePropertyDeclaration::default();
     let mut input = cssparser::ParserInput::new(&value);
     let mut parser = cssparser::Parser::new(&mut input);
-    if PropertyDeclaration::parse_into(&mut source, property_id.clone(), &parser_context, &mut parser)
-        .is_err()
+    if PropertyDeclaration::parse_into(
+        &mut source,
+        property_id.clone(),
+        &parser_context,
+        &mut parser,
+    )
+    .is_err()
     {
         return Ok(js_string!("").into());
     }
@@ -2653,7 +2633,11 @@ fn serialize_css_value(_this: &JsValue, args: &[JsValue], context: &mut Context)
 }
 
 /// Parse a URL against an optional base, using the same parser the broker uses.
-fn url_with_userinfo(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn url_with_userinfo(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let href = arg_string(args, 0, context)?;
     let field = arg_string(args, 1, context)?;
     let value = arg_string(args, 2, context)?;
@@ -2708,20 +2692,34 @@ fn parse_url(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
         ("username", url.username().to_string()),
         ("password", url.password().unwrap_or_default().to_string()),
         ("protocol", format!("{}:", url.scheme())),
-        ("host", url.host_str().map(|h| match url.port() {
-            Some(port) => format!("{h}:{port}"),
-            None => h.to_string(),
-        }).unwrap_or_default()),
+        (
+            "host",
+            url.host_str()
+                .map(|h| match url.port() {
+                    Some(port) => format!("{h}:{port}"),
+                    None => h.to_string(),
+                })
+                .unwrap_or_default(),
+        ),
         ("hostname", url.host_str().unwrap_or_default().to_string()),
-        ("port", url.port().map(|p| p.to_string()).unwrap_or_default()),
+        (
+            "port",
+            url.port().map(|p| p.to_string()).unwrap_or_default(),
+        ),
         ("pathname", url.path().to_string()),
         // Empty is not the same as absent to a URL, but it is to `search`:
         // `https://e.com/?` reports "" in a browser, not "?".
-        ("search", match url.query() {
-            Some(q) if !q.is_empty() => format!("?{q}"),
-            _ => String::new(),
-        }),
-        ("hash", url.fragment().map(|f| format!("#{f}")).unwrap_or_default()),
+        (
+            "search",
+            match url.query() {
+                Some(q) if !q.is_empty() => format!("?{q}"),
+                _ => String::new(),
+            },
+        ),
+        (
+            "hash",
+            url.fragment().map(|f| format!("#{f}")).unwrap_or_default(),
+        ),
     ];
     for (name, value) in fields {
         out.set(js_string!(name), js_string!(value), false, context)?;
@@ -2751,7 +2749,12 @@ fn viewport(_this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResu
     out.set(js_string!("height"), size.1 as f64, false, context)?;
     // The engine renders with `ColorScheme::Light`; saying so is what lets a
     // page pick the palette it will actually be screenshotted in.
-    out.set(js_string!("colorScheme"), js_string!("light"), false, context)?;
+    out.set(
+        js_string!("colorScheme"),
+        js_string!("light"),
+        false,
+        context,
+    )?;
     Ok(out.into())
 }
 
@@ -2776,7 +2779,6 @@ fn write_cookie(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
     let stored = host.broker.store_cookie(&host.base, &header);
     Ok(JsValue::from(stored as f64))
 }
-
 
 // ── websockets ───────────────────────────────────────────────────────────────
 //
@@ -2836,7 +2838,9 @@ fn socket_open(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
             Ok(JsValue::from(id as f64))
         }
         // A refusal is an answer the page can see, the same as a refused fetch.
-        Err(error) => Err(boa_engine::JsNativeError::error().with_message(error).into()),
+        Err(error) => Err(boa_engine::JsNativeError::error()
+            .with_message(error)
+            .into()),
     }
 }
 
@@ -2849,7 +2853,9 @@ fn socket_send(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
         None => Ok(JsValue::from(false)),
         Some(socket) => match socket.send(&text) {
             Ok(()) => Ok(JsValue::from(true)),
-            Err(error) => Err(boa_engine::JsNativeError::error().with_message(error).into()),
+            Err(error) => Err(boa_engine::JsNativeError::error()
+                .with_message(error)
+                .into()),
         },
     }
 }
@@ -2929,7 +2935,9 @@ fn sse_open(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
             host.streams.borrow_mut().insert(id, stream);
             Ok(JsValue::from(id as f64))
         }
-        Err(error) => Err(boa_engine::JsNativeError::error().with_message(error).into()),
+        Err(error) => Err(boa_engine::JsNativeError::error()
+            .with_message(error)
+            .into()),
     }
 }
 

@@ -446,7 +446,11 @@ pub fn discover(doc: &BaseDocument, base: &url::Url) -> Transcript {
             });
         }
 
-        ids.push(attr(node, "id").map(|id| collapse(&id)).filter(|id| !id.is_empty()));
+        ids.push(
+            attr(node, "id")
+                .map(|id| collapse(&id))
+                .filter(|id| !id.is_empty()),
+        );
         out.media.push(media);
     }
 
@@ -460,7 +464,10 @@ pub fn discover(doc: &BaseDocument, base: &url::Url) -> Transcript {
     // parses as an id plus a class.
     let mut seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for (_, node) in doc.tree().iter() {
-        if let Some(id) = attr(node, "id").map(|id| collapse(&id)).filter(|id| !id.is_empty()) {
+        if let Some(id) = attr(node, "id")
+            .map(|id| collapse(&id))
+            .filter(|id| !id.is_empty())
+        {
             *seen.entry(id).or_default() += 1;
         }
     }
@@ -589,9 +596,7 @@ pub fn read(
                     crate::cors::Mode::Cors,
                     crate::cors::Credentials::SameOrigin,
                 ),
-                None => {
-                    broker.fetch_from(&url, crate::receipt::Initiator::Subresource, None)
-                }
+                None => broker.fetch_from(&url, crate::receipt::Initiator::Subresource, None),
             };
             let track = &mut media.tracks[index];
             track.fetched = true;
@@ -601,7 +606,10 @@ pub fn read(
                 track.error = Some(error);
                 continue;
             }
-            if outcome.status.is_some_and(|code| !(200..300).contains(&code)) {
+            if outcome
+                .status
+                .is_some_and(|code| !(200..300).contains(&code))
+            {
                 track.error = Some(format!(
                     "the server answered {} for this track",
                     outcome.status.unwrap_or_default()
@@ -898,7 +906,7 @@ fn cap(mut value: String, limit: usize) -> String {
     value
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use crate::engine::{PageFactory, PageOptions};
@@ -909,9 +917,8 @@ mod tests {
     const PAGE: &str = "https://site.example/talk";
 
     fn discovered(html: &str) -> Transcript {
-        let broker =
-            crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
-                .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = PageFactory::new(broker, fonts.sources.clone(), PageOptions::default());
         let base = url::Url::parse(PAGE).unwrap();
@@ -935,10 +942,16 @@ mod tests {
         assert_eq!(found.media.len(), 1);
         let media = &found.media[0];
         assert_eq!(media.kind, "video");
-        assert_eq!(media.src.as_deref(), Some("https://site.example/media/talk.mp4"));
+        assert_eq!(
+            media.src.as_deref(),
+            Some("https://site.example/media/talk.mp4")
+        );
         assert_eq!(media.label.as_deref(), Some("The talk"));
         assert_eq!(media.tracks.len(), 2);
-        assert_eq!(media.selector, None, "this element has no id, so it has no handle");
+        assert_eq!(
+            media.selector, None,
+            "this element has no id, so it has no handle"
+        );
         assert_eq!(media.tracks[0].src, "https://site.example/cc/en.vtt");
         assert!(media.tracks[0].default);
         assert!(!media.tracks[1].default);
@@ -1003,12 +1016,18 @@ mod tests {
         assert!(is_css_ident("main-video_2"));
         assert!(is_css_ident("café"));
         assert!(is_css_ident("-leading-dash-then-letter"));
-        assert!(is_css_ident("--custom-property-shaped"), "a second dash also starts one");
+        assert!(
+            is_css_ident("--custom-property-shaped"),
+            "a second dash also starts one"
+        );
         assert!(is_css_ident("नमस्ते"), "every code point above U+0080 is one");
         assert!(is_css_ident("cafe\u{301}"), "and so is a combining mark");
         assert!(!is_css_ident("video.main"), "a class follows the id");
         assert!(!is_css_ident("two words"), "a descendant combinator");
-        assert!(!is_css_ident("2fast"), "an identifier cannot start with a digit");
+        assert!(
+            !is_css_ident("2fast"),
+            "an identifier cannot start with a digit"
+        );
         assert!(!is_css_ident("-1a"), "nor a dash and then one");
         assert!(!is_css_ident("-"), "a bare dash is not an identifier");
         // A no-break space is whitespace, so `collapse` has already turned it
@@ -1040,9 +1059,7 @@ mod tests {
     fn a_long_but_closed_tag_is_still_stripped() {
         let long_class = "a-generated-class-name".repeat(12);
         let (cues, _) = parse(
-            &format!(
-                "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<c.{long_class}>the words</c>\n"
-            ),
+            &format!("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<c.{long_class}>the words</c>\n"),
             DEFAULT_MAX_BYTES,
         );
         assert_eq!(cues[0].text, "the words", "{}", cues[0].text);
@@ -1427,8 +1444,16 @@ mod tests {
             seq: Some(7),
             error: None,
             cues: vec![
-                Cue { start: 1.0, end: 2.0, text: "First.".into() },
-                Cue { start: 760.0, end: 762.0, text: "Later.".into() },
+                Cue {
+                    start: 1.0,
+                    end: 2.0,
+                    text: "First.".into(),
+                },
+                Cue {
+                    start: 760.0,
+                    end: 762.0,
+                    text: "Later.".into(),
+                },
             ],
             truncated: None,
         };

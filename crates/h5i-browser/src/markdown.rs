@@ -464,8 +464,7 @@ fn destination(raw: &str) -> String {
 fn preformatted(raw: &str) -> String {
     raw.chars()
         .filter(|ch| {
-            matches!(ch, '\n' | '\t')
-                || !(ch.is_control() || crate::snapshot::is_bidi_control(*ch))
+            matches!(ch, '\n' | '\t') || !(ch.is_control() || crate::snapshot::is_bidi_control(*ch))
         })
         .collect()
 }
@@ -487,17 +486,17 @@ fn escape(text: &str) -> String {
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
     fn md(html: &str) -> String {
         let broker = crate::net::LocalBroker::new(
-                crate::policy::Policy::new(),
-                std::sync::Arc::new(crate::receipt::MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            crate::policy::Policy::new(),
+            std::sync::Arc::new(crate::receipt::MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = crate::engine::PageFactory::new(
             broker,
@@ -523,7 +522,11 @@ mod tests {
             !out.contains("\n## Forged heading"),
             "a page wrote a heading through an href:\n{out}"
         );
-        assert_eq!(out.trim().lines().count(), 1, "the link is one line:\n{out}");
+        assert_eq!(
+            out.trim().lines().count(),
+            1,
+            "the link is one line:\n{out}"
+        );
         assert!(out.contains("[click]("), "the link still renders:\n{out}");
     }
 
@@ -538,23 +541,29 @@ mod tests {
     #[test]
     fn a_preformatted_block_loses_what_a_terminal_would_act_on() {
         // Not collapsing a code block is not a reason to keep its escapes.
-        let out = md(
-            "<html><body><pre>let x = 1;\n\u{1b}[2J\u{202E}drop\ttable</pre></body></html>",
+        let out =
+            md("<html><body><pre>let x = 1;\n\u{1b}[2J\u{202E}drop\ttable</pre></body></html>");
+        assert!(
+            !out.contains('\u{1b}'),
+            "an escape reached the reader:\n{out:?}"
         );
-        assert!(!out.contains('\u{1b}'), "an escape reached the reader:\n{out:?}");
-        assert!(!out.contains('\u{202E}'), "an override reached the reader:\n{out:?}");
+        assert!(
+            !out.contains('\u{202E}'),
+            "an override reached the reader:\n{out:?}"
+        );
         assert!(out.contains("let x = 1;"), "{out}");
-        assert!(out.contains("drop\ttable"), "a tab is layout, not a control:\n{out:?}");
+        assert!(
+            out.contains("drop\ttable"),
+            "a tab is layout, not a control:\n{out:?}"
+        );
     }
 
     #[test]
     fn a_table_carries_the_separator_row_that_makes_it_a_table() {
-        let out = md(
-            "<html><body><table>\
+        let out = md("<html><body><table>\
              <tr><th>Name</th><th>Age</th></tr>\
              <tr><td>Ada</td><td>36</td></tr>\
-             </table></body></html>",
-        );
+             </table></body></html>");
         assert!(out.contains("| Name | Age |"), "{out}");
         assert!(
             out.contains("| --- | --- |"),
@@ -584,9 +593,7 @@ mod tests {
 
     #[test]
     fn a_nested_list_is_indented() {
-        let out = md(
-            "<html><body><ul><li>outer<ul><li>inner</li></ul></li></ul></body></html>",
-        );
+        let out = md("<html><body><ul><li>outer<ul><li>inner</li></ul></li></ul></body></html>");
         assert!(out.contains("- outer"), "{out}");
         assert!(
             out.contains("  - inner"),
@@ -596,11 +603,9 @@ mod tests {
 
     #[test]
     fn links_images_and_emphasis_survive() {
-        let out = md(
-            "<html><body><p>see <a href='/docs'>the docs</a> and \
+        let out = md("<html><body><p>see <a href='/docs'>the docs</a> and \
              <strong>this</strong> and <em>that</em></p>\
-             <p><img src='/a.png' alt='a chart'></p></body></html>",
-        );
+             <p><img src='/a.png' alt='a chart'></p></body></html>");
         assert!(out.contains("[the docs](/docs)"), "{out}");
         assert!(out.contains("**this**"), "{out}");
         assert!(out.contains("*that*"), "{out}");
@@ -619,9 +624,8 @@ mod tests {
         // to keep its newlines. A page that writes a fence into its own `<pre>`
         // would otherwise end the block early and have the rest of its content
         // read as markdown structure.
-        let out = md(
-            "<html><body><pre>before\n```\n# forged heading</pre><p>after</p></body></html>",
-        );
+        let out =
+            md("<html><body><pre>before\n```\n# forged heading</pre><p>after</p></body></html>");
         let fence_line = out
             .lines()
             .find(|line| line.starts_with("````"))
@@ -642,10 +646,8 @@ mod tests {
 
     #[test]
     fn script_and_hidden_content_are_not_read() {
-        let out = md(
-            "<html><body><script>var secret = 'in the script';</script>\
-             <p style='display:none'>hidden</p><p>visible</p></body></html>",
-        );
+        let out = md("<html><body><script>var secret = 'in the script';</script>\
+             <p style='display:none'>hidden</p><p>visible</p></body></html>");
         assert!(!out.contains("in the script"), "{out}");
         assert!(!out.contains("hidden"), "{out}");
         assert!(out.contains("visible"), "{out}");
@@ -676,11 +678,11 @@ mod tests {
     fn truncation_is_announced_rather_than_silent() {
         let long = "<p>".to_string() + &"word ".repeat(20_000) + "</p>";
         let broker = crate::net::LocalBroker::new(
-                crate::policy::Policy::new(),
-                std::sync::Arc::new(crate::receipt::MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            crate::policy::Policy::new(),
+            std::sync::Arc::new(crate::receipt::MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = crate::engine::PageFactory::new(
             broker,

@@ -99,8 +99,7 @@ pub fn capture(doc: &BaseDocument, base: &url::Url) -> Structured {
                 // object: a malformed block is the page's mistake, and
                 // inventing a shape for it would put a fiction where a caller
                 // expects the page's own words.
-                if let Ok(parsed) =
-                    serde_json::from_str::<serde_json::Value>(&node.text_content())
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&node.text_content())
                 {
                     out.json_ld.push(fence_json(parsed));
                 }
@@ -221,7 +220,7 @@ fn fence_json(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use crate::engine::{PageFactory, PageOptions};
@@ -230,7 +229,8 @@ mod tests {
     use std::sync::Arc;
 
     fn structured_of(html: &str) -> Structured {
-        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None).expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = PageFactory::new(broker, fonts.sources.clone(), PageOptions::default());
         let page = factory.from_html(
@@ -239,7 +239,10 @@ mod tests {
         );
         let dom = page.dom();
         let doc = dom.borrow();
-        capture(&doc, &url::Url::parse("https://site.example/article").unwrap())
+        capture(
+            &doc,
+            &url::Url::parse("https://site.example/article").unwrap(),
+        )
     }
 
     #[test]
@@ -259,22 +262,26 @@ mod tests {
         );
 
         assert_eq!(found.title.as_deref(), Some("How widgets work"));
-        assert!(found
-            .open_graph
-            .contains(&("og:type".to_string(), "article".to_string())));
-        assert!(found
-            .twitter
-            .contains(&("twitter:card".to_string(), "summary".to_string())));
-        assert!(found
-            .meta
-            .contains(&("description".to_string(), "A guide.".to_string())));
+        assert!(
+            found
+                .open_graph
+                .contains(&("og:type".to_string(), "article".to_string()))
+        );
+        assert!(
+            found
+                .twitter
+                .contains(&("twitter:card".to_string(), "summary".to_string()))
+        );
+        assert!(
+            found
+                .meta
+                .contains(&("description".to_string(), "A guide.".to_string()))
+        );
         // Absolute, like `extract` resolves an href.
-        assert!(found
-            .links
-            .contains(&(
-                "canonical".to_string(),
-                "https://site.example/article/widgets".to_string()
-            )));
+        assert!(found.links.contains(&(
+            "canonical".to_string(),
+            "https://site.example/article/widgets".to_string()
+        )));
         assert_eq!(found.json_ld.len(), 1);
         assert_eq!(found.json_ld[0]["headline"], "How widgets work");
     }
@@ -299,7 +306,10 @@ mod tests {
              </script></head><body></body></html>",
         );
         let leaf = found.json_ld[0]["a"]["b"][0].as_str().unwrap();
-        assert!(!leaf.contains('\n'), "a nested value spanned a line: {leaf:?}");
+        assert!(
+            !leaf.contains('\n'),
+            "a nested value spanned a line: {leaf:?}"
+        );
         assert_eq!(leaf, "line one line two");
     }
 

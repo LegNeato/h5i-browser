@@ -13,6 +13,7 @@ pub mod redact;
 #[derive(Error, Debug)]
 pub enum H5iError {
     /// 1. Temporal Dimension (History): Git operations
+    #[cfg(feature = "git")]
     #[error("Git error: {0}")]
     Git(#[from] git2::Error),
 
@@ -65,3 +66,27 @@ impl H5iError {
 }
 
 pub type Result<T> = std::result::Result<T, H5iError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_errors_keep_their_path_and_source() {
+        let error = H5iError::with_path(std::io::ErrorKind::PermissionDenied.into(), "page.html");
+        match error {
+            H5iError::IoWithContext { path, source } => {
+                assert_eq!(path, PathBuf::from("page.html"));
+                assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+            _ => panic!("I/O context must be preserved"),
+        }
+    }
+
+    #[cfg(feature = "git")]
+    #[test]
+    fn the_default_git_feature_preserves_error_conversion() {
+        let error: H5iError = git2::Error::from_str("test failure").into();
+        assert!(matches!(error, H5iError::Git(_)));
+    }
+}

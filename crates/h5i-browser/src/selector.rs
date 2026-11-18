@@ -136,11 +136,7 @@ pub fn for_node_cached(doc: &BaseDocument, node_id: usize, cache: &mut Cache) ->
 }
 
 /// One element's own segment, without any ancestor context.
-fn local_segment_cached(
-    doc: &BaseDocument,
-    node_id: usize,
-    cache: &mut Cache,
-) -> Option<String> {
+fn local_segment_cached(doc: &BaseDocument, node_id: usize, cache: &mut Cache) -> Option<String> {
     let node = doc.get_node(node_id)?;
     let element = node.element_data()?;
     let tag = element.name.local.to_string();
@@ -261,14 +257,13 @@ fn attr(doc: &BaseDocument, node_id: usize, name: &str) -> Option<String> {
 
 /// Every match, through the matcher the action verbs use.
 fn matches(doc: &BaseDocument, selector: &str) -> Vec<usize> {
-    crate::script::dom_api::matches_within(doc, 0, selector)
+    crate::dom_query::matches_within(doc, 0, selector)
 }
 
 /// The first match, through the same matcher, stopping there.
 fn first_match(doc: &BaseDocument, selector: &str) -> Option<usize> {
-    crate::script::dom_api::first_match_in_document(doc, selector)
+    crate::dom_query::first_match_in_document(doc, selector)
 }
-
 
 /// Whether a value can go after `#` without quoting.
 ///
@@ -288,17 +283,17 @@ fn escape_attr(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
     fn page(html: &str) -> crate::engine::Page {
         let broker = crate::net::LocalBroker::new(
-                crate::policy::Policy::new(),
-                std::sync::Arc::new(crate::receipt::MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            crate::policy::Policy::new(),
+            std::sync::Arc::new(crate::receipt::MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(2));
         let factory = crate::engine::PageFactory::new(
             broker,
@@ -320,8 +315,8 @@ mod tests {
             .unwrap_or_else(|| panic!("no ref named {name:?} in {:?}", snapshot.refs));
         let dom = page.dom();
         let doc = dom.borrow();
-        let selector = for_node(&doc, entry.node_id)
-            .unwrap_or_else(|| panic!("no selector for {name:?}"));
+        let selector =
+            for_node(&doc, entry.node_id).unwrap_or_else(|| panic!("no selector for {name:?}"));
         (selector, entry.node_id)
     }
 
@@ -489,20 +484,25 @@ mod tests {
     fn an_unreadable_target_is_left_to_position() {
         let long = "/x?".to_string() + &"p=1&".repeat(60);
         assert!(long.len() > MAX_ATTR_VALUE);
-        let html = format!(
-            "<html><body><section><a href='{long}'>Go</a></section></body></html>"
-        );
+        let html = format!("<html><body><section><a href='{long}'>Go</a></section></body></html>");
         let p = page(&html);
         let snapshot = p.snapshot();
         let dom = p.dom();
         let doc = dom.borrow();
-        let entry = snapshot.refs.iter().find(|r| r.role == "link").expect("a link");
+        let entry = snapshot
+            .refs
+            .iter()
+            .find(|r| r.role == "link")
+            .expect("a link");
         let selector = for_node(&doc, entry.node_id).expect("a selector");
         assert!(
             !selector.contains("p=1&p=1"),
             "a tracking URL is unique and unreadable: {selector}"
         );
-        assert_eq!(matches(&doc, &selector).first().copied(), Some(entry.node_id));
+        assert_eq!(
+            matches(&doc, &selector).first().copied(),
+            Some(entry.node_id)
+        );
     }
 
     /// The two query modes name the same element, or the faster one is
@@ -545,7 +545,11 @@ mod tests {
                     "{selector} is a different element depending on how it is asked"
                 );
                 // ...and it is still the element it was built for.
-                assert_eq!(first_match(&doc, &selector), Some(entry.node_id), "{selector}");
+                assert_eq!(
+                    first_match(&doc, &selector),
+                    Some(entry.node_id),
+                    "{selector}"
+                );
                 checked += 1;
             }
         }
@@ -571,7 +575,10 @@ mod tests {
             let mut cold = Cache::new();
             let via_cold = cold.resolves_to(&doc, &selector, entry.node_id);
 
-            assert!(via_warm, "{selector} stopped resolving once its matches were known");
+            assert!(
+                via_warm,
+                "{selector} stopped resolving once its matches were known"
+            );
             assert_eq!(via_warm, via_cold, "{selector} depends on cache order");
         }
     }
@@ -587,13 +594,13 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod query_mode_measurement {
     use super::*;
 
     /// The first match, through the same matcher, stopping there.
     fn first(doc: &BaseDocument, selector: &str) -> Option<usize> {
-        crate::script::dom_api::first_match_in_document(doc, selector)
+        crate::dom_query::first_match_in_document(doc, selector)
     }
 
     fn page(html: &str) -> crate::engine::Page {

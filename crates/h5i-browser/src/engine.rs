@@ -20,8 +20,8 @@ use blitz_traits::shell::{ColorScheme, Viewport};
 use h5i_error::H5iError;
 use url::Url;
 
-use crate::fonts::FontSetup;
 use crate::broker::Broker;
+use crate::fonts::FontSetup;
 use crate::net::BrokerNet;
 use crate::receipt::Initiator;
 use crate::snapshot::Snapshot;
@@ -38,11 +38,13 @@ pub struct PageOptions {
     /// Off by default and opt-in at every layer above, because turning it on is
     /// a change to what an untrusted page can do inside the box rather than a
     /// rendering preference (roadmap-history.md §12.5).
+    #[cfg(feature = "javascript")]
     pub script: bool,
     /// How long one navigation may take, first byte to last.
     pub navigation_budget: std::time::Duration,
 
     /// How long the script realm's job queue may run before it is cancelled.
+    #[cfg(feature = "javascript")]
     pub script_budget: Option<std::time::Duration>,
 
     /// Install the WebIDL member decoration in the script realm.
@@ -50,6 +52,7 @@ pub struct PageOptions {
     /// *For instruments*, and off by default: see
     /// [`crate::script::RealmOptions::webidl_conformance`] for what it costs
     /// and who observes it.
+    #[cfg(feature = "javascript")]
     pub webidl_conformance: bool,
 }
 
@@ -60,8 +63,11 @@ impl Default for PageOptions {
             height: 720,
             scale: 1.0,
             max_snapshot_lines: 500,
+            #[cfg(feature = "javascript")]
             script: false,
+            #[cfg(feature = "javascript")]
             script_budget: None,
+            #[cfg(feature = "javascript")]
             webidl_conformance: false,
             // Above what a slow real page takes and far below what a stuck one
             // would, which is the shape every ceiling in this engine has.
@@ -249,7 +255,6 @@ pub fn encode_form_body(enctype: &str, entries: &[(String, String)]) -> (Vec<u8>
             (out.into_bytes(), "text/plain;charset=UTF-8".to_string())
         }
         "multipart/form-data" => {
-            let boundary = crate::multipart::fresh_boundary();
             let parts: Vec<crate::multipart::Part> = entries
                 .iter()
                 .map(|(name, value)| crate::multipart::Part {
@@ -258,6 +263,7 @@ pub fn encode_form_body(enctype: &str, entries: &[(String, String)]) -> (Vec<u8>
                     ..Default::default()
                 })
                 .collect();
+            let boundary = crate::multipart::boundary_for(&parts);
             (
                 crate::multipart::serialize(&parts, &boundary),
                 format!("multipart/form-data; boundary={boundary}"),
@@ -337,6 +343,7 @@ pub type Dom = Rc<RefCell<BaseDocument>>;
 /// A loaded, resolved document.
 /// Elements whose content the tokenizer reads as raw text, where `<!--` opens
 /// no comment.
+#[cfg(feature = "javascript")]
 const RAW_TEXT_ELEMENTS: [&str; 8] = [
     "script", "style", "textarea", "title", "xmp", "noembed", "noframes", "iframe",
 ];
@@ -346,7 +353,11 @@ const RAW_TEXT_ELEMENTS: [&str; 8] = [
 /// Paired by position, and only when both sides found the same number: a scan is
 /// not a parser, and one comment too many would put every later comment's text
 /// on the wrong node.
-fn recover_comments(html: &str, doc: &blitz_dom::BaseDocument) -> std::collections::HashMap<usize, String> {
+#[cfg(feature = "javascript")]
+fn recover_comments(
+    html: &str,
+    doc: &blitz_dom::BaseDocument,
+) -> std::collections::HashMap<usize, String> {
     let ids = comment_nodes(doc);
     if ids.is_empty() {
         return std::collections::HashMap::new();
@@ -359,6 +370,7 @@ fn recover_comments(html: &str, doc: &blitz_dom::BaseDocument) -> std::collectio
 }
 
 /// Every comment node under the document, in tree order.
+#[cfg(feature = "javascript")]
 fn comment_nodes(doc: &blitz_dom::BaseDocument) -> Vec<usize> {
     let mut found = Vec::new();
     let mut stack = vec![doc.root_node().id];
@@ -380,6 +392,7 @@ fn comment_nodes(doc: &blitz_dom::BaseDocument) -> Vec<usize> {
 /// Follows the tokenizer where it matters and not where it does not: raw-text
 /// elements are skipped because `<!--` inside a `<script>` opens no comment,
 /// and a comment ends at `-->`, at `--!>`, or at the end of the input.
+#[cfg(feature = "javascript")]
 fn comment_texts(html: &str) -> Vec<String> {
     let bytes = html.as_bytes();
     let mut found = Vec::new();
@@ -447,11 +460,13 @@ pub struct Page {
     /// Where [`CapturedNavigation`] leaves whatever the last form asked for.
     pending_navigation: NavigationSlot,
     /// So the page can hear `load` and `error`. See [`crate::net::ResourceLog`].
+    #[cfg(feature = "javascript")]
     resources: crate::net::ResourceLog,
     /// The script realm, when this page has one. `None` when script is off,
     /// which is still the default: `capabilities.javascript` is the gate, and
     /// flipping it is a threat-model decision rather than a feature flag
     /// (roadmap-history.md §12.5).
+    #[cfg(feature = "javascript")]
     script: Option<crate::script::Script>,
     /// What this page's load cost, against what it was allowed.
     ///
@@ -465,17 +480,20 @@ pub struct Page {
     /// the time already spent on the network counts against it. That is the
     /// point: the per-phase budgets each bound their own step, and a page that
     /// is inside every one of them can still take the better part of a minute.
+    #[cfg(feature = "javascript")]
     deadline: crate::budget::Deadline,
     /// Whether `run_scripts` was called, regardless of whether it built a realm.
     ///
     /// A page with no script elements never gets one, so `script.is_some()`
     /// alone cannot tell "script is off" from "there was nothing to run".
+    #[cfg(feature = "javascript")]
     ran_scripts: bool,
     /// What each parsed comment node actually said, by node id.
     ///
     /// Blitz stores `NodeData::Comment` as a unit variant, so the text is lost at
     /// parse time. Next.js marks Suspense boundaries with `<!--$-->`, and React
     /// cannot hydrate against markers that all read as empty.
+    #[cfg(feature = "javascript")]
     parsed_comments: std::collections::HashMap<usize, String>,
 
     /// Set when the layout engine panicked while reading this page.
@@ -485,6 +503,7 @@ pub struct Page {
     /// the same to a reader who is not told.
     layout_failure: Option<String>,
     /// What the last settle did, for the snapshot to report.
+    #[cfg(feature = "javascript")]
     settled: Option<crate::script::Settled>,
     /// Engine-level facts the next snapshot should carry.
     notes: Vec<String>,
@@ -494,6 +513,7 @@ pub struct Page {
 const MAX_SELF_SUBMISSIONS: usize = 3;
 
 /// Enough for an image that loads an image. A page that keeps going is looping.
+#[cfg(feature = "javascript")]
 const RESOURCE_EVENT_PASSES: usize = 3;
 
 /// The event-handler content attributes, as a selector.
@@ -504,6 +524,7 @@ const RESOURCE_EVENT_PASSES: usize = 3;
 /// mirrors the one `prelude.js` compiles from, and the two are meant to agree.
 /// This one decides whether the realm is built, that one decides what the
 /// realm compiles once it is.
+#[cfg(feature = "javascript")]
 const INLINE_HANDLER_SELECTOR: &str = "[onload],[onclick],[onerror],[onchange],[oninput],\
     [onsubmit],[onfocus],[onblur],[onkeydown],[onkeyup],[onkeypress],[onmousedown],\
     [onmouseup],[onmouseover],[onmouseout],[onmousemove],[ondblclick],[onscroll],\
@@ -517,8 +538,7 @@ const INLINE_HANDLER_SELECTOR: &str = "[onload],[onclick],[onerror],[onchange],[
 /// the document is built, which is before its subresources and frames are
 /// fetched, and again when the page is finished, for an origin change that
 /// happened after that.
-const SESSION_DROPPED_NOTE: &str =
-    "cookies from the previous origin were dropped on navigation: this engine keeps only the \
+const SESSION_DROPPED_NOTE: &str = "cookies from the previous origin were dropped on navigation: this engine keeps only the \
      cookies the document now loaded could itself send";
 
 /// How many frame documents one page may pull in, including nested ones.
@@ -666,7 +686,9 @@ fn load_frames(page: &mut Page, broker: &Arc<dyn Broker>) {
                 let doc = page.doc.borrow();
                 let mut stack = vec![frame_id];
                 while let Some(at) = stack.pop() {
-                    let Some(node) = doc.get_node(at) else { continue };
+                    let Some(node) = doc.get_node(at) else {
+                        continue;
+                    };
                     if at != frame_id
                         && let Some(el) = node.element_data()
                     {
@@ -777,6 +799,7 @@ fn is_javascript_url(value: &str) -> bool {
 }
 
 /// Whether to compile the browser prelude while this navigation is in flight.
+#[cfg(feature = "javascript")]
 fn worth_warming(url: &Url, options: &PageOptions) -> bool {
     if !options.script {
         return false;
@@ -810,6 +833,7 @@ impl Page {
         let mut followed: Vec<String> = Vec::new();
 
         for _ in 0..=MAX_META_REFRESH_HOPS {
+            #[cfg(feature = "javascript")]
             let outcome = if worth_warming(&target, &options) {
                 broker.fetch_while(&target, Initiator::Navigation, &mut || {
                     crate::script::warm_prelude();
@@ -817,8 +841,12 @@ impl Page {
             } else {
                 broker.fetch(&target, Initiator::Navigation)
             };
+            #[cfg(not(feature = "javascript"))]
+            let outcome = broker.fetch(&target, Initiator::Navigation);
             if let Some(error) = outcome.error {
-                return Err(H5iError::Metadata(format!("could not open {target}: {error}")));
+                return Err(H5iError::Metadata(format!(
+                    "could not open {target}: {error}"
+                )));
             }
 
             // Decoded as the document says it is written, not as UTF-8. A
@@ -836,7 +864,8 @@ impl Page {
             // markup we already hold and building is the expensive half.
             let refresh = meta_refresh(&html, &final_url);
             if let Some((delay, next)) = &refresh
-                && *delay <= META_REFRESH_MAX_DELAY_SECONDS && !visited.contains(next)
+                && *delay <= META_REFRESH_MAX_DELAY_SECONDS
+                && !visited.contains(next)
             {
                 followed.push(final_url.to_string());
                 visited.push(next.clone());
@@ -1064,8 +1093,7 @@ impl Page {
         // mention it is a reading that quietly changed the subject.
         if unloadable_images && layout_failure.is_none() {
             layout_failure = Some(
-                "this page's images could not be loaded, so it was read without them"
-                    .to_string(),
+                "this page's images could not be loaded, so it was read without them".to_string(),
             );
         }
 
@@ -1082,25 +1110,32 @@ impl Page {
             notes.push(SESSION_DROPPED_NOTE.to_string());
         }
 
+        #[cfg(feature = "javascript")]
         let parsed_comments = recover_comments(html, &doc);
 
         Self {
             // Assumed until `from_bytes` says otherwise: a string handed
             // straight to `from_html` has already been decoded by someone.
             encoding: encoding_rs::UTF_8,
+            #[cfg(feature = "javascript")]
             parsed_comments,
             doc: Rc::new(RefCell::new(doc)),
             url: base_url.clone(),
             // Armed here rather than at the script phase, so the fetching and
             // parsing already done count against it.
+            #[cfg(feature = "javascript")]
             deadline: crate::budget::Deadline::new(options.navigation_budget),
             budget_spent: None,
             options,
             pending_navigation,
+            #[cfg(feature = "javascript")]
             resources,
+            #[cfg(feature = "javascript")]
             script: None,
+            #[cfg(feature = "javascript")]
             ran_scripts: false,
             layout_failure,
+            #[cfg(feature = "javascript")]
             settled: None,
             notes,
         }
@@ -1111,6 +1146,7 @@ impl Page {
     }
 
     /// Run the page's own scripts, then settle.
+    #[cfg(feature = "javascript")]
     pub fn run_scripts(&mut self, broker: Arc<dyn Broker>) -> Result<(), H5iError> {
         // In document order, inline and external together, because execution
         // order is semantics: a bundle that defines a global in one script and
@@ -1295,9 +1331,7 @@ impl Page {
             .into_iter()
             // The map has been read; it is not code and must reach neither list.
             .filter(|(_, source)| !matches!(source, Source::ImportMap(_)))
-            .partition(|(_, source)| {
-                matches!(source, Source::Inline(_) | Source::External(_))
-            });
+            .partition(|(_, source)| matches!(source, Source::Inline(_) | Source::External(_)));
 
         let phase_started = std::time::Instant::now();
         // Whichever runs out first. The script phase has its own ceiling, and
@@ -1326,42 +1360,42 @@ impl Page {
         // overlaps is the wait. `Broker::send_while` defaults to a plain send, so
         // an in-process broker runs exactly as it did.
         let mut pending: Option<(usize, String, String)> = None;
-        let run_pending = |script: &mut crate::script::Script,
-                               pending: &mut Option<(usize, String, String)>| {
-            let Some((node, where_from, code)) = pending.take() else {
-                return;
+        let run_pending =
+            |script: &mut crate::script::Script, pending: &mut Option<(usize, String, String)>| {
+                let Some((node, where_from, code)) = pending.take() else {
+                    return;
+                };
+                script.set_current_script(Some(node));
+                let at = std::time::Instant::now();
+                let ran = script.eval_named(&code, &where_from);
+                if crate::script::timing_page() {
+                    eprintln!(
+                        "PAGE_TIME script {:>8.1}ms {:>8} bytes {}",
+                        at.elapsed().as_secs_f64() * 1000.0,
+                        code.len(),
+                        where_from
+                    );
+                }
+                // Before `currentScript` is cleared, which is where HTML puts it:
+                // the checkpoint is inside "run a classic script", and only the
+                // step *after* that restores the element. So a continuation this
+                // script queued still sees the script it came from — which is how
+                // a chunk loader that awaits before instantiating finds its own
+                // tag. Clearing first read as "no script is running" and every
+                // such loader failed.
+                script.microtask_checkpoint();
+                script.set_current_script(None);
+                if let Err(error) = ran {
+                    // Reported, not fatal: a page with one broken script is still a
+                    // page, and the agent needs to know which half it is reading.
+                    //
+                    // Recorded as not-run too: a bundle that threw halfway leaves
+                    // its globals undefined exactly as a refused one does, and the
+                    // ReferenceError that follows should blame this, not the engine.
+                    script.note_refused_script(&where_from);
+                    script.note_error(&format!("{where_from}: {error}"));
+                }
             };
-            script.set_current_script(Some(node));
-            let at = std::time::Instant::now();
-            let ran = script.eval_named(&code, &where_from);
-            if crate::script::timing_page() {
-                eprintln!(
-                    "PAGE_TIME script {:>8.1}ms {:>8} bytes {}",
-                    at.elapsed().as_secs_f64() * 1000.0,
-                    code.len(),
-                    where_from
-                );
-            }
-            // Before `currentScript` is cleared, which is where HTML puts it:
-            // the checkpoint is inside "run a classic script", and only the
-            // step *after* that restores the element. So a continuation this
-            // script queued still sees the script it came from — which is how
-            // a chunk loader that awaits before instantiating finds its own
-            // tag. Clearing first read as "no script is running" and every
-            // such loader failed.
-            script.microtask_checkpoint();
-            script.set_current_script(None);
-            if let Err(error) = ran {
-                // Reported, not fatal: a page with one broken script is still a
-                // page, and the agent needs to know which half it is reading.
-                //
-                // Recorded as not-run too: a bundle that threw halfway leaves
-                // its globals undefined exactly as a refused one does, and the
-                // ReferenceError that follows should blame this, not the engine.
-                script.note_refused_script(&where_from);
-                script.note_error(&format!("{where_from}: {error}"));
-            }
-        };
 
         for (index, (node, source)) in classic.into_iter().enumerate() {
             if phase_started.elapsed() >= phase_budget {
@@ -1400,11 +1434,9 @@ impl Page {
                     // policy read it as the agent naming a URL, so a page from
                     // the open web could point a `<script src>` at the box's
                     // dev server and run whatever came back.
-                    let ask = crate::broker::Fetch::get(
-                        &url,
-                        crate::receipt::Initiator::Subresource,
-                    )
-                    .from_document(Some(&document));
+                    let ask =
+                        crate::broker::Fetch::get(&url, crate::receipt::Initiator::Subresource)
+                            .from_document(Some(&document));
                     let outcome = broker.send_while(&ask, &mut || {
                         run_pending(&mut script, &mut pending);
                     });
@@ -1559,6 +1591,7 @@ impl Page {
     }
 
     /// Fire a real event at a node and let the page respond.
+    #[cfg(feature = "javascript")]
     pub fn dispatch_event(
         &mut self,
         node_id: usize,
@@ -1582,6 +1615,7 @@ impl Page {
     /// *immediately* "not there, and nothing here will change that" rather than
     /// a budget spent proving it. The same holds for a scripted page that has
     /// gone quiet, which is where the settle loop's `Quiescent` end comes from.
+    #[cfg(feature = "javascript")]
     pub fn wait_for(&mut self, target: &WaitTarget) -> crate::script::Waited {
         let dom = self.doc.clone();
         let max_lines = self.options.max_snapshot_lines;
@@ -1637,6 +1671,7 @@ impl Page {
     ///
     /// `None` when this session has no realm, which the caller reports as a
     /// routing answer rather than as a condition that failed.
+    #[cfg(feature = "javascript")]
     pub fn wait_for_script(&mut self, expr: &str) -> Option<crate::script::Waited> {
         let script = self.script.as_mut()?;
         let mut waited = script.settle_until_expr(expr);
@@ -1650,8 +1685,13 @@ impl Page {
     /// page's own code, so it owes the same layout re-resolve and the same
     /// `settled` record, and forgetting either would leave the next snapshot
     /// describing a document the engine had not laid out.
+    #[cfg(feature = "javascript")]
     fn after_script(&mut self, settled: crate::script::Settled) -> bool {
-        let dirty = self.script.as_mut().map(|s| s.take_dirty()).unwrap_or(false);
+        let dirty = self
+            .script
+            .as_mut()
+            .map(|s| s.take_dirty())
+            .unwrap_or(false);
         self.settled = Some(settled);
         // Canvas surfaces reach the page here, before layout rather than after:
         // attaching the pixels sets the element's intrinsic size, which the
@@ -1668,6 +1708,7 @@ impl Page {
     /// After layout, not before: Blitz starts a fetch when it resolves the
     /// tree, so an `<img>` script appended has no outcome until then. A handler
     /// can add another, so this repeats, bounded.
+    #[cfg(feature = "javascript")]
     fn deliver_resource_events(&mut self) {
         for _ in 0..RESOURCE_EVENT_PASSES {
             let Some(script) = self.script.as_mut() else {
@@ -1682,6 +1723,7 @@ impl Page {
     }
 
     /// Hand every drawn canvas surface to the document as raster image data.
+    #[cfg(feature = "javascript")]
     fn composite_canvases(&mut self) -> bool {
         let Some(script) = self.script.as_ref() else {
             return false;
@@ -1746,6 +1788,7 @@ impl Page {
     /// Silent when there is none, which is the same shape `dispatch_event`
     /// takes: a page with no script cannot be listening, so there is nothing
     /// the absence could be hiding.
+    #[cfg(feature = "javascript")]
     fn dispatch_key(&mut self, node_id: usize, kind: &str, key: &str) {
         let Some(script) = self.script.as_mut() else {
             return;
@@ -1767,6 +1810,7 @@ impl Page {
     /// differ between two reads without the agent having done anything. That is a
     /// real capability and a real caveat, and the determinism claim is one this
     /// engine makes loudly elsewhere.
+    #[cfg(feature = "javascript")]
     pub fn open_sockets(&mut self) -> usize {
         self.script
             .as_mut()
@@ -1780,11 +1824,13 @@ impl Page {
     }
 
     /// What the last settle did, if script ran.
+    #[cfg(feature = "javascript")]
     pub fn settled(&self) -> Option<&crate::script::Settled> {
         self.settled.as_ref()
     }
 
     /// Web APIs the page asked for and this engine does not have.
+    #[cfg(feature = "javascript")]
     pub fn unsupported(&self) -> Vec<(String, usize)> {
         self.script
             .as_ref()
@@ -1793,15 +1839,26 @@ impl Page {
     }
 
     /// What the page logged, for the console pane and the receipt.
+    #[cfg(feature = "javascript")]
     pub fn console(&self) -> Vec<crate::script::host::ConsoleLine> {
-        self.script.as_ref().map(|s| s.console()).unwrap_or_default()
+        self.script
+            .as_ref()
+            .map(|s| s.console())
+            .unwrap_or_default()
     }
 
     pub fn has_script(&self) -> bool {
         // Whether this page ran script, not whether a realm exists: a page with
         // no script elements never builds one, and reporting that as "script is
         // off" would describe the session wrongly.
-        self.ran_scripts
+        #[cfg(feature = "javascript")]
+        {
+            self.ran_scripts
+        }
+        #[cfg(not(feature = "javascript"))]
+        {
+            false
+        }
     }
 
     /// A handle to the document, for the script realm.
@@ -1845,7 +1902,7 @@ impl Page {
             &self.doc.borrow(),
             self.url.as_str(),
             self.options.max_snapshot_lines,
-            self.ran_scripts,
+            self.has_script(),
         );
 
         snapshot.notes.extend(self.notes.iter().cloned());
@@ -1855,12 +1912,21 @@ impl Page {
         // engine could not run, and which of those it is belongs in the
         // outline rather than in the agent's imagination.
         if snapshot.lines.is_empty() {
-            let scripts = self.doc.borrow().query_selector_all("script").map(|s| s.len()).unwrap_or(0);
+            let scripts = self
+                .doc
+                .borrow()
+                .query_selector_all("script")
+                .map(|s| s.len())
+                .unwrap_or(0);
+            #[cfg(feature = "javascript")]
+            let realm = self.script.is_some();
+            #[cfg(not(feature = "javascript"))]
+            let realm = false;
             snapshot.notes.push(format!(
                 "this page produced no readable content. It has {scripts} script element(s) \
                  and this engine {}. If it needs JavaScript beyond what is listed above, the \
                  chromium engine has more of it.",
-                match (self.script.is_some(), self.ran_scripts, scripts) {
+                match (realm, self.has_script(), scripts) {
                     (true, _, _) => "ran them",
                     // No realm because there was nothing to run, which is a
                     // different fact from script being switched off.
@@ -1916,24 +1982,28 @@ impl Page {
         // `open_sockets` carries, and it belongs in the outline for the same
         // reason. Silence here would leave an agent unable to tell a page that
         // is animating from one that is done.
+        #[cfg(feature = "javascript")]
         if let Some(settled) = &self.settled
             && (settled.cut_off || settled.periodic_timers > 0)
         {
             snapshot.notes.push(settled.render());
         }
 
-        let unsupported = self.unsupported();
-        if !unsupported.is_empty() {
-            let listed = unsupported
-                .iter()
-                .take(6)
-                .map(|(name, count)| format!("{name} x{count}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            snapshot.notes.push(format!(
-                "this page used Web APIs this engine does not have ({listed}). \
-                 What depends on them did not run; the chromium engine has them."
-            ));
+        #[cfg(feature = "javascript")]
+        {
+            let unsupported = self.unsupported();
+            if !unsupported.is_empty() {
+                let listed = unsupported
+                    .iter()
+                    .take(6)
+                    .map(|(name, count)| format!("{name} x{count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                snapshot.notes.push(format!(
+                    "this page used Web APIs this engine does not have ({listed}). \
+                     What depends on them did not run; the chromium engine has them."
+                ));
+            }
         }
 
         snapshot
@@ -1991,7 +2061,10 @@ impl Page {
             if !(kind.eq_ignore_ascii_case("checkbox") || kind.eq_ignore_ascii_case("radio")) {
                 return None;
             }
-            matches!(element.special_data, SpecialElementData::CheckboxInput(true))
+            matches!(
+                element.special_data,
+                SpecialElementData::CheckboxInput(true)
+            )
         };
 
         if was == checked {
@@ -2055,8 +2128,11 @@ impl Page {
         // The pair a *user* edit fires, in the order a page expects. A page
         // that enables its submit button on `change` needs this or the button
         // stays disabled through a replay that looks like it worked.
-        self.dispatch_event(node_id, "input");
-        self.dispatch_event(node_id, "change");
+        #[cfg(feature = "javascript")]
+        {
+            self.dispatch_event(node_id, "input");
+            self.dispatch_event(node_id, "change");
+        }
         Some(true)
     }
 
@@ -2072,10 +2148,15 @@ impl Page {
                 return SelectOutcome::NotASelect;
             }
             let mut found = Vec::new();
-            let mut stack: Vec<usize> = doc.get_node(node_id).map(|n| n.children.clone()).unwrap_or_default();
+            let mut stack: Vec<usize> = doc
+                .get_node(node_id)
+                .map(|n| n.children.clone())
+                .unwrap_or_default();
             stack.reverse();
             while let Some(id) = stack.pop() {
-                let Some(child) = doc.get_node(id) else { continue };
+                let Some(child) = doc.get_node(id) else {
+                    continue;
+                };
                 if child.data.is_element_with_tag_name(&local_name!("option")) {
                     let text = crate::snapshot::collapse(&child.text_content());
                     let value = child
@@ -2129,8 +2210,11 @@ impl Page {
             let _ = lay_out_doc(&mut doc);
         }
 
-        self.dispatch_event(node_id, "input");
-        self.dispatch_event(node_id, "change");
+        #[cfg(feature = "javascript")]
+        {
+            self.dispatch_event(node_id, "input");
+            self.dispatch_event(node_id, "change");
+        }
         SelectOutcome::Chosen(value)
     }
 
@@ -2140,6 +2224,7 @@ impl Page {
     /// move on. The keys that *do* something rather than the ones that enter
     /// text. `type` covers the second and this covers the first, and merging
     /// them would mean a verb whose meaning depended on its argument.
+    #[cfg(feature = "javascript")]
     pub fn press(&mut self, node_id: usize, key: &str) -> bool {
         {
             let mut doc = self.doc.borrow_mut();
@@ -2186,6 +2271,7 @@ impl Page {
         // A *user* edit fires input then change, in that order. Script setting
         // `.value` does not, and must not, or a framework that re-renders on
         // its own write would loop. This is the user path, so it fires.
+        #[cfg(feature = "javascript")]
         if let Some(script) = self.script.as_mut() {
             let _ = script.dispatch(node_id, "input");
             let _ = script.dispatch(node_id, "change");
@@ -2250,6 +2336,7 @@ impl Page {
         // Tab moves between controls rather than into one, so it is answered
         // before the field is consulted at all.
         if edit == Edit::FocusNext || edit == Edit::FocusPrevious {
+            #[cfg(feature = "javascript")]
             self.dispatch_key(node_id, "keydown", &key.name);
             let moved = {
                 let mut doc = self.doc.borrow_mut();
@@ -2260,6 +2347,7 @@ impl Page {
                     _ => false,
                 }
             };
+            #[cfg(feature = "javascript")]
             self.dispatch_key(node_id, "keyup", &key.name);
             return moved;
         }
@@ -2274,6 +2362,7 @@ impl Page {
         if !takes_text {
             // Not a field, but the key is still delivered: a page may be
             // listening for it on a button or on the document.
+            #[cfg(feature = "javascript")]
             for kind in ["keydown", "keypress", "keyup"] {
                 self.dispatch_key(node_id, kind, &key.name);
             }
@@ -2281,6 +2370,7 @@ impl Page {
         }
 
         let before = self.field_value(node_id);
+        #[cfg(feature = "javascript")]
         self.dispatch_key(node_id, "keydown", &key.name);
         if edit != Edit::Ignore {
             let mut doc = self.doc.borrow_mut();
@@ -2313,16 +2403,17 @@ impl Page {
 
         let after = self.field_value(node_id);
         let changed = before != after;
+        #[cfg(feature = "javascript")]
         if edit.types() {
             self.dispatch_key(node_id, "keypress", &key.name);
         }
+        #[cfg(feature = "javascript")]
         self.dispatch_key(node_id, "keyup", &key.name);
 
         // A user edit fires `input`; script setting `.value` must not, or a
         // framework that re-renders on its own write would loop.
-        if changed
-            && let Some(script) = self.script.as_mut()
-        {
+        #[cfg(feature = "javascript")]
+        if changed && let Some(script) = self.script.as_mut() {
             let _ = script.dispatch(node_id, "input");
             let settled = script.settle();
             let dirty = script.take_dirty();
@@ -2364,11 +2455,9 @@ impl Page {
         // owner is found by walking up. That misses the `form=` attribute's
         // remote-owner case, which is rare enough to be a stated limit rather
         // than a reimplementation of the association algorithm.
-        let form_id = self
-            .enclosing_form(node_id)
-            .ok_or_else(|| {
-                H5iError::Metadata("that control is not inside a form this page defines".into())
-            })?;
+        let form_id = self.enclosing_form(node_id).ok_or_else(|| {
+            H5iError::Metadata("that control is not inside a form this page defines".into())
+        })?;
 
         self.doc.borrow_mut().submit_form(form_id, node_id);
 
@@ -2397,7 +2486,11 @@ impl Page {
     ///
     /// Returns the requests the handlers caused, and whether the form should
     /// still be submitted the ordinary way.
-    pub fn activate(&mut self, node_id: usize) -> Option<(Vec<crate::script::host::RequestLink>, bool)> {
+    #[cfg(feature = "javascript")]
+    pub fn activate(
+        &mut self,
+        node_id: usize,
+    ) -> Option<(Vec<crate::script::host::RequestLink>, bool)> {
         let script = self.script.as_mut()?;
         let mut proceed = script.dispatch_reporting(node_id, "click").unwrap_or(true);
         if proceed
@@ -2433,7 +2526,9 @@ impl Page {
         let Some(element) = node.element_data() else {
             return false;
         };
-        let kind = element.attr(local_name!("type")).map(str::to_ascii_lowercase);
+        let kind = element
+            .attr(local_name!("type"))
+            .map(str::to_ascii_lowercase);
         match element.name.local.as_ref() {
             "button" => matches!(kind.as_deref(), None | Some("submit")),
             "input" => matches!(kind.as_deref(), Some("submit") | Some("image")),
@@ -2521,6 +2616,7 @@ impl Page {
     /// offset the page is now at. Without this a scroll moved the viewport and
     /// told nobody, which is the "scrolling loads nothing here" the scraping
     /// course found.
+    #[cfg(feature = "javascript")]
     pub fn scrolled(&mut self) -> Option<Vec<crate::script::host::RequestLink>> {
         let root = self.doc.borrow().root_element().id;
         self.dispatch_event(root, "scroll")
@@ -2532,6 +2628,7 @@ impl Page {
     /// page hears `hashchange`, and the DOM it has already built survives.
     /// Opening it as a fresh page instead discarded whatever the click's own
     /// handler had just done, which is most of what `href="#"` is for.
+    #[cfg(feature = "javascript")]
     pub fn navigate_fragment(&mut self, to: &Url) -> Option<Vec<crate::script::host::RequestLink>> {
         self.url = to.clone();
         let script = self.script.as_mut()?;
@@ -2561,11 +2658,7 @@ impl Page {
             let node = doc.get_node(node_id)?;
             if let Some(href) = node
                 .attrs()
-                .and_then(|attrs| {
-                    attrs
-                        .iter()
-                        .find(|attr| attr.name.local.as_ref() == "href")
-                })
+                .and_then(|attrs| attrs.iter().find(|attr| attr.name.local.as_ref() == "href"))
                 .map(|attr| attr.value.as_str())
             {
                 return self.url.join(href).ok();
@@ -2574,7 +2667,6 @@ impl Page {
         }
         None
     }
-
 
     /// Everything on screen a human could act on, and where it is.
     ///
@@ -2624,7 +2716,7 @@ impl Page {
             &self.doc.borrow(),
             self.url.as_str(),
             self.options.max_snapshot_lines,
-            self.ran_scripts,
+            self.has_script(),
         )
         .plain_text()
     }
@@ -2632,6 +2724,7 @@ impl Page {
 
 /// What a `wait_for` is waiting for.
 #[derive(Debug, Clone)]
+#[cfg(feature = "javascript")]
 pub enum WaitTarget {
     /// A CSS selector that must match at least one element.
     Selector(String),
@@ -2704,7 +2797,9 @@ impl PageFactory {
                     ));
                 }
                 Err(error) => {
-                    page.note(&format!("this page tried to submit a form by itself: {error}"));
+                    page.note(&format!(
+                        "this page tried to submit a form by itself: {error}"
+                    ));
                     return page;
                 }
             }
@@ -2770,6 +2865,7 @@ impl PageFactory {
         if self.broker.keep_only_origin(page.url()) {
             page.note(SESSION_DROPPED_NOTE);
         }
+        #[cfg(feature = "javascript")]
         if self.options.script {
             page.run_scripts(self.broker.clone())?;
         }
@@ -2794,16 +2890,29 @@ impl PageFactory {
     /// Whether this factory runs page script, for `capabilities` and for the
     /// engine line the viewers show.
     pub fn runs_script(&self) -> bool {
-        self.options.script
+        #[cfg(feature = "javascript")]
+        {
+            self.options.script
+        }
+        #[cfg(not(feature = "javascript"))]
+        {
+            false
+        }
     }
 
     /// A navigation is starting.
+    #[cfg(feature = "native")]
     fn begin_navigation(&self) -> crate::budget::HardStop {
         self.broker.reset_budget();
         // Held by the caller until the page is built, which is the span every
         // deadline in this engine is supposed to cover and the one where none of
         // them reach layout. See `HardStop`.
         crate::budget::HardStop::arm(self.options.navigation_budget)
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn begin_navigation(&self) {
+        self.broker.reset_budget();
     }
 
     pub fn open(&self, url: &Url) -> Result<Page, H5iError> {
@@ -2863,7 +2972,6 @@ fn guard_layout(body: impl FnOnce()) -> Result<(), String> {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
 
     outcome.map_err(|payload| {
-        
         payload
             .downcast_ref::<&str>()
             .map(|s| (*s).to_string())
@@ -2882,7 +2990,9 @@ fn prune_deep_nesting(doc: &mut BaseDocument) -> usize {
         let root = doc.root_node().id;
         let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
         while let Some((id, depth)) = stack.pop() {
-            let Some(node) = doc.get_node(id) else { continue };
+            let Some(node) = doc.get_node(id) else {
+                continue;
+            };
             if depth >= MAX_ELEMENT_DEPTH {
                 doomed.push(id);
                 continue;
@@ -2915,7 +3025,10 @@ fn strip_image_sources(html: &str) -> String {
     let mut at = 0;
     while let Some(found) = lowered[at..].find("<img") {
         let start = at + found;
-        let end = lowered[start..].find('>').map(|e| start + e + 1).unwrap_or(html.len());
+        let end = lowered[start..]
+            .find('>')
+            .map(|e| start + e + 1)
+            .unwrap_or(html.len());
         out.push_str(&html[at..start]);
         // Keep the tag and everything except its source attributes, so `alt`
         // survives, which is the part an agent was going to read anyway.
@@ -2950,6 +3063,7 @@ fn declared_content_type(outcome: &crate::net::FetchOutcome) -> Option<String> {
 const MAX_META_REFRESH_HOPS: usize = 3;
 
 /// How long the whole script phase may take before this engine stops starting more of it.
+#[cfg(feature = "javascript")]
 const SCRIPT_PHASE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The line between "this page redirected" and "this page updates itself".
@@ -2986,7 +3100,9 @@ fn challenge_marker(html: &str) -> Option<&'static str> {
     // Typographic apostrophes normalised to ASCII: pypi writes "couldn’t" with
     // U+2019, and a matcher that only knows `'` would miss it while looking
     // like it had checked.
-    let lowered = html.to_ascii_lowercase().replace(['\u{2019}', '\u{02BC}'], "'");
+    let lowered = html
+        .to_ascii_lowercase()
+        .replace(['\u{2019}', '\u{02BC}'], "'");
     CHALLENGE_MARKERS
         .into_iter()
         .find(|marker| lowered.contains(marker))
@@ -3095,12 +3211,7 @@ fn flatten_onto_white(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, H
     Ok(rgb)
 }
 
-fn encode_jpeg(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    quality: u8,
-) -> Result<Vec<u8>, H5iError> {
+fn encode_jpeg(rgba: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>, H5iError> {
     use image::codecs::jpeg::JpegEncoder;
 
     let rgb = flatten_onto_white(rgba, width, height)?;
@@ -3120,8 +3231,8 @@ fn encode_jpeg(
 /// differently against a light and a dark viewer. This is also what Chromium's
 /// `captureScreenshot` does unless transparency is requested explicitly.
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, H5iError> {
-    use image::codecs::png::PngEncoder;
     use image::ImageEncoder;
+    use image::codecs::png::PngEncoder;
 
     let rgb = flatten_onto_white(rgba, width, height)?;
 
@@ -3171,12 +3282,14 @@ fn seed_checkbox_state(doc: &mut BaseDocument) {
 }
 
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod tests {
     use super::*;
     use crate::policy::Policy;
     use crate::receipt::MemorySink;
 
     #[test]
+    #[cfg(feature = "javascript")]
     fn the_prelude_is_warmed_only_where_the_bet_cannot_lose() {
         let scripted = PageOptions {
             script: true,
@@ -3192,7 +3305,10 @@ mod tests {
 
         // Scripting off means no realm is ever built, so this would be waste on
         // every page rather than on some.
-        assert!(!worth_warming(&at("https://docs.example/"), &PageOptions::default()));
+        assert!(!worth_warming(
+            &at("https://docs.example/"),
+            &PageOptions::default()
+        ));
 
         // Nothing local. These answer in about a millisecond, so a scriptless
         // one would pay the whole compile as added latency, and local pages are
@@ -3216,7 +3332,10 @@ mod tests {
         // A name that merely looks like loopback is not loopback, and must not
         // lose the optimisation by string-matching.
         assert!(worth_warming(&at("http://127.0.0.1.evil.test/"), &scripted));
-        assert!(worth_warming(&at("https://localhost.evil.test/"), &scripted));
+        assert!(worth_warming(
+            &at("https://localhost.evil.test/"),
+            &scripted
+        ));
     }
 
     fn page_from(html: &str, policy: Policy, sink: Arc<MemorySink>) -> Page {
@@ -3303,8 +3422,14 @@ mod tests {
         let rendered = snapshot.render();
 
         assert_eq!(snapshot.title, "Docs");
-        assert!(rendered.contains("heading1 \"Getting started\""), "{rendered}");
-        assert!(rendered.contains("paragraph \"Install it first.\""), "{rendered}");
+        assert!(
+            rendered.contains("heading1 \"Getting started\""),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("paragraph \"Install it first.\""),
+            "{rendered}"
+        );
         // The link is wrapped in div>span, but the outline should not make an
         // agent walk through anonymous containers to find it.
         assert!(rendered.contains("link \"Read the guide\""), "{rendered}");
@@ -3336,7 +3461,10 @@ mod tests {
 
         let rendered = snapshot.render();
         // The paragraph keeps its whole sentence...
-        assert!(rendered.contains("paragraph \"See the guide for more.\""), "{rendered}");
+        assert!(
+            rendered.contains("paragraph \"See the guide for more.\""),
+            "{rendered}"
+        );
         // ...and the link is addressable underneath it rather than lost in it.
         assert!(rendered.contains("link \"guide\" [ref=e1]"), "{rendered}");
         // Named by its `<label>`, which beats the placeholder: that is the
@@ -3351,7 +3479,9 @@ mod tests {
             Arc::new(MemorySink::new()),
         );
         assert!(
-            bare.snapshot().render().contains("textbox \"you@example.com\""),
+            bare.snapshot()
+                .render()
+                .contains("textbox \"you@example.com\""),
             "{}",
             bare.snapshot().render()
         );
@@ -3417,7 +3547,10 @@ mod tests {
             denied.iter().any(|u| u.contains("pixel.gif")),
             "the tracking pixel should be refused: {denied:?}"
         );
-        assert!(sink.fetched_urls().is_empty(), "nothing should reach the wire");
+        assert!(
+            sink.fetched_urls().is_empty(),
+            "nothing should reach the wire"
+        );
 
         assert!(page.snapshot().render().contains("Still here"));
 
@@ -3607,16 +3740,21 @@ mod tests {
 
 #[cfg(test)]
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod frame_tests {
     use super::*;
     use crate::policy::Policy;
     use crate::receipt::MemorySink;
 
     fn page_with(html: &str, policy: Policy) -> (Page, Arc<crate::net::LocalBroker>) {
-        let broker =
-            crate::net::LocalBroker::new(policy, Arc::new(MemorySink::new()), None).expect("broker");
+        let broker = crate::net::LocalBroker::new(policy, Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory = PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
         let mut page = Page::from_bytes(
             html.as_bytes(),
             Some("text/html"),
@@ -3637,7 +3775,9 @@ mod frame_tests {
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
             for _ in 0..4 {
-                let Ok((stream, _)) = listener.accept() else { return };
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 let _ = reader.read_line(&mut line);
@@ -3669,7 +3809,10 @@ mod frame_tests {
             Policy::new(),
         );
         let rendered = page.snapshot().render();
-        assert!(rendered.contains("Pay"), "frame content missing:\n{rendered}");
+        assert!(
+            rendered.contains("Pay"),
+            "frame content missing:\n{rendered}"
+        );
         assert!(
             !rendered.contains("document.title"),
             "script text leaked into the outline:\n{rendered}"
@@ -3703,7 +3846,9 @@ mod frame_tests {
                 let rendered = page.snapshot().render();
                 assert!(!rendered.is_empty());
                 assert!(
-                    page.notes.iter().any(|n| n.contains("nests elements more than")),
+                    page.notes
+                        .iter()
+                        .any(|n| n.contains("nests elements more than")),
                     "the bound is said, not silently applied: {:?}",
                     page.notes
                 );
@@ -3718,16 +3863,14 @@ mod frame_tests {
     /// The parse-time bound is not the only door into a deep tree: script can
     /// build one after it, and the next layout walks whatever is there.
     #[test]
+    #[cfg(feature = "javascript")]
     fn a_script_built_deep_tree_does_not_take_the_process_down() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
-                let broker = crate::net::LocalBroker::new(
-                    Policy::new(),
-                    Arc::new(MemorySink::new()),
-                    None,
-                )
-                .expect("broker");
+                let broker =
+                    crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+                        .expect("broker");
                 let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
                 let factory = PageFactory::new(
                     broker,
@@ -3755,16 +3898,14 @@ mod frame_tests {
     /// recursion too, and script can read it back in the same turn it built the
     /// tree in, before any layout, and so before the layout-time bound.
     #[test]
+    #[cfg(feature = "javascript")]
     fn reading_back_a_deep_tree_does_not_take_the_process_down() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
-                let broker = crate::net::LocalBroker::new(
-                    Policy::new(),
-                    Arc::new(MemorySink::new()),
-                    None,
-                )
-                .expect("broker");
+                let broker =
+                    crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+                        .expect("broker");
                 let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
                 let factory = PageFactory::new(
                     broker,
@@ -3783,7 +3924,10 @@ mod frame_tests {
                     &Url::parse("https://host.example/").unwrap(),
                 );
                 let rendered = page.snapshot().render();
-                assert!(rendered.contains("len="), "the script finished:\n{rendered}");
+                assert!(
+                    rendered.contains("len="),
+                    "the script finished:\n{rendered}"
+                );
             })
             .expect("a thread")
             .join()
@@ -3798,12 +3942,14 @@ mod frame_tests {
     fn the_depth_walk_costs_little_against_a_layout() {
         let path = std::env::var("H5I_PERF_PAGE").expect("set H5I_PERF_PAGE");
         let html = std::fs::read_to_string(path).expect("read");
-        let broker =
-            crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
-                .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory =
-            PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
         let page = factory.from_html(&html, &Url::parse("https://host.example/").unwrap());
 
         let mut nodes = 0usize;
@@ -3811,7 +3957,9 @@ mod frame_tests {
             let doc = page.doc.borrow();
             let mut stack = vec![doc.root_node().id];
             while let Some(id) = stack.pop() {
-                let Some(node) = doc.get_node(id) else { continue };
+                let Some(node) = doc.get_node(id) else {
+                    continue;
+                };
                 nodes += 1;
                 stack.extend(node.children.iter().copied());
             }
@@ -3839,16 +3987,14 @@ mod frame_tests {
     /// style read reaches layout on a tree script has just built, before the
     /// settle loop does, and so before the bound the settle loop applies.
     #[test]
+    #[cfg(feature = "javascript")]
     fn a_style_read_on_a_deep_tree_does_not_take_the_process_down() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
-                let broker = crate::net::LocalBroker::new(
-                    Policy::new(),
-                    Arc::new(MemorySink::new()),
-                    None,
-                )
-                .expect("broker");
+                let broker =
+                    crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+                        .expect("broker");
                 let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
                 let factory = PageFactory::new(
                     broker,
@@ -3879,16 +4025,14 @@ mod frame_tests {
     /// hitting it: `collect_text_content` recurses with no depth of its own,
     /// and `innerText` reaches it for an element that is not rendered.
     #[test]
+    #[cfg(feature = "javascript")]
     fn reading_inner_text_of_a_deep_hidden_tree_does_not_take_the_process_down() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
-                let broker = crate::net::LocalBroker::new(
-                    Policy::new(),
-                    Arc::new(MemorySink::new()),
-                    None,
-                )
-                .expect("broker");
+                let broker =
+                    crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+                        .expect("broker");
                 let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
                 let factory = PageFactory::new(
                     broker,
@@ -3908,7 +4052,10 @@ mod frame_tests {
                     &Url::parse("https://host.example/").unwrap(),
                 );
                 let rendered = page.snapshot().render();
-                assert!(rendered.contains("len="), "the script finished:\n{rendered}");
+                assert!(
+                    rendered.contains("len="),
+                    "the script finished:\n{rendered}"
+                );
             })
             .expect("a thread")
             .join()
@@ -3941,13 +4088,10 @@ mod frame_tests {
     }
 
     #[test]
+    #[cfg(feature = "javascript")]
     fn a_frames_inline_handlers_are_script_and_do_not_run_either() {
-        let broker = crate::net::LocalBroker::new(
-            Policy::new(),
-            Arc::new(MemorySink::new()),
-            None,
-        )
-        .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
         let options = PageOptions {
             script: true,
@@ -3978,7 +4122,10 @@ mod frame_tests {
             .expect("the frame content is in the tree");
         page.dispatch_event(trap, "click");
         let rendered = page.snapshot().render();
-        assert!(rendered.contains("inner"), "frame content missing:\n{rendered}");
+        assert!(
+            rendered.contains("inner"),
+            "frame content missing:\n{rendered}"
+        );
         assert!(
             !rendered.contains("pwned"),
             "a frame's inline handler ran in the host realm:\n{rendered}"
@@ -4023,12 +4170,8 @@ mod frame_tests {
     fn a_page_cannot_frame_the_previous_origin_with_its_session_still_in_the_jar() {
         let body = "<p>the account page</p>";
         let bank = one_shot_server(body);
-        let broker = crate::net::LocalBroker::new(
-            Policy::new(),
-            Arc::new(MemorySink::new()),
-            None,
-        )
-        .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         // The previous navigation's session, held for the origin it belongs to.
         broker.jar().store(
             &Url::parse(&format!("http://127.0.0.1:{bank}/")).unwrap(),
@@ -4040,8 +4183,11 @@ mod frame_tests {
             r#"<html><body><iframe src="http://127.0.0.1:{bank}/account"></iframe></body></html>"#
         );
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory =
-            PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
         // A *different* origin: a different loopback port is a different
         // origin, and this one is the page being read.
         let evil = Url::parse("http://127.0.0.2:9/").unwrap();
@@ -4064,7 +4210,8 @@ mod frame_tests {
             .filter_map(|r| r.cookies_sent)
             .sum();
         assert_eq!(
-            carried, 0,
+            carried,
+            0,
             "the previous origin's session rode along on a frame fetch: {:?}",
             broker.records()
         );
@@ -4082,12 +4229,14 @@ mod frame_tests {
         let html = format!(
             r#"<html><body><iframe src="http://127.0.0.1:{port}/inner"></iframe></body></html>"#
         );
-        let broker =
-            crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
-                .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory =
-            PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
         let mut page = Page::from_bytes(
             html.as_bytes(),
             Some("text/html"),
@@ -4126,15 +4275,14 @@ mod frame_tests {
         let html = format!(
             r#"<html><body><iframe src="http://127.0.0.1:{port}/inner"></iframe></body></html>"#
         );
-        let broker = crate::net::LocalBroker::new(
-            Policy::new(),
-            Arc::new(MemorySink::new()),
-            None,
-        )
-        .expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory =
-            PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
         let mut page = Page::from_bytes(
             html.as_bytes(),
             Some("text/html"),
@@ -4175,7 +4323,10 @@ mod frame_tests {
             .split("BEGIN UNTRUSTED PAGE CONTENT")
             .nth(1)
             .unwrap_or(&rendered);
-        assert!(!fenced.contains("pixel"), "refused content leaked:\n{rendered}");
+        assert!(
+            !fenced.contains("pixel"),
+            "refused content leaked:\n{rendered}"
+        );
         assert!(
             page.notes
                 .iter()
@@ -4185,7 +4336,10 @@ mod frame_tests {
         );
         // And it is a *recorded* refusal: the deny is in the log.
         assert!(
-            broker.records().iter().any(|r| r.url.contains("tracker.example") && !r.allowed),
+            broker
+                .records()
+                .iter()
+                .any(|r| r.url.contains("tracker.example") && !r.allowed),
             "the refusal must be receipted"
         );
     }
@@ -4245,6 +4399,7 @@ mod frame_tests {
 }
 
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod navigation_origin_tests {
     use super::*;
     use crate::policy::Policy;
@@ -4261,11 +4416,11 @@ mod navigation_origin_tests {
     #[test]
     fn a_form_submission_drops_the_previous_origins_cookies() {
         let broker = crate::net::LocalBroker::new(
-                Policy::new().allow("bank.example").allow("evil.example"),
-                Arc::new(MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            Policy::new().allow("bank.example").allow("evil.example"),
+            Arc::new(MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         // A live session on one origin.
         broker.jar().store(
             &Url::parse("https://bank.example/").unwrap(),
@@ -4274,7 +4429,11 @@ mod navigation_origin_tests {
         assert_eq!(broker.jar().len(), 1);
 
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory = PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
 
         // Landing on another origin, however we got there, must drop it.
         let page = Page::from_bytes(
@@ -4299,7 +4458,9 @@ mod navigation_origin_tests {
             "and it must not be sendable"
         );
         assert!(
-            page.notes.iter().any(|n| n.contains("dropped on navigation")),
+            page.notes
+                .iter()
+                .any(|n| n.contains("dropped on navigation")),
             "the drop is stated, not silent: {:?}",
             page.notes
         );
@@ -4310,17 +4471,21 @@ mod navigation_origin_tests {
     #[test]
     fn staying_on_an_origin_keeps_the_session_through_finish() {
         let broker = crate::net::LocalBroker::new(
-                Policy::new().allow("bank.example"),
-                Arc::new(MemorySink::new()),
-                None,
-            )
-            .expect("broker");
+            Policy::new().allow("bank.example"),
+            Arc::new(MemorySink::new()),
+            None,
+        )
+        .expect("broker");
         broker.jar().store(
             &Url::parse("https://bank.example/").unwrap(),
             ["sid=secret; HttpOnly"],
         );
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
-        let factory = PageFactory::new(broker.clone(), fonts.sources.clone(), PageOptions::default());
+        let factory = PageFactory::new(
+            broker.clone(),
+            fonts.sources.clone(),
+            PageOptions::default(),
+        );
 
         let page = Page::from_bytes(
             b"<html><body>ok</body></html>",
@@ -4332,18 +4497,25 @@ mod navigation_origin_tests {
         );
         let page = factory.finish(page).expect("finish");
         assert_eq!(broker.jar().len(), 1);
-        assert!(!page.notes.iter().any(|n| n.contains("dropped on navigation")));
+        assert!(
+            !page
+                .notes
+                .iter()
+                .any(|n| n.contains("dropped on navigation"))
+        );
     }
 }
 
 #[cfg(test)]
+#[cfg(feature = "native")]
 mod input_tests {
     use super::*;
     use crate::policy::Policy;
     use crate::receipt::MemorySink;
 
     fn page_with(html: &str) -> Page {
-        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None).expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &crate::fonts::default_font_dirs(), Some(4));
         let factory = PageFactory::new(broker, fonts.sources.clone(), PageOptions::default());
         factory.from_html(html, &Url::parse("https://site.example/page").unwrap())
@@ -4456,9 +4628,8 @@ mod input_tests {
 
     #[test]
     fn typing_without_fonts_replaces_the_value_and_preserves_whitespace() {
-        let broker = crate::net::LocalBroker::new(
-            Policy::new(), Arc::new(MemorySink::new()), None,
-        ).expect("broker");
+        let broker = crate::net::LocalBroker::new(Policy::new(), Arc::new(MemorySink::new()), None)
+            .expect("broker");
         let fonts = crate::fonts::load(&[], &[], Some(0));
         assert!(fonts.is_empty());
         let mut page = Page::from_html(
@@ -4484,6 +4655,26 @@ mod input_tests {
             let request = page.submit_form(submit).expect("submits");
             assert_eq!(request.body, encoded.as_bytes());
         }
+    }
+
+    #[test]
+    #[cfg(not(feature = "javascript"))]
+    fn a_build_without_javascript_keeps_static_forms_and_does_not_run_scripts() {
+        let mut page = page_with(
+            "<title>Static catalog</title>\
+             <form method='post' action='/answer'>\
+             <input name='answer' placeholder='Amount'><button>Save</button></form>\
+             <script>document.title='Script ran';document.body.textContent='Replaced';</script>",
+        );
+        assert!(!page.has_script());
+        let snapshot = page.snapshot();
+        assert_eq!(snapshot.title, "Static catalog");
+        assert!(!snapshot.render().contains("Replaced"));
+        assert!(page.type_into(ref_node(&page, "Amount"), "1234"));
+        let request = page
+            .submit_form(ref_node(&page, "Save"))
+            .expect("static form submits");
+        assert_eq!(request.body, b"answer=1234");
     }
 
     #[test]
@@ -4539,7 +4730,11 @@ mod input_tests {
         assert_eq!(submission.method, "GET");
         assert!(submission.body.is_empty(), "a GET carries no body");
         assert!(
-            submission.url.query().unwrap_or_default().contains("q=kelp+forests"),
+            submission
+                .url
+                .query()
+                .unwrap_or_default()
+                .contains("q=kelp+forests"),
             "{}",
             submission.url
         );
@@ -4547,7 +4742,8 @@ mod input_tests {
 
     #[test]
     fn a_control_outside_any_form_says_so_rather_than_submitting_nothing() {
-        let mut page = page_with("<html><body><input type='text' placeholder='loose'></body></html>");
+        let mut page =
+            page_with("<html><body><input type='text' placeholder='loose'></body></html>");
         let loose = ref_node(&page, "loose");
         let error = page.submit_form(loose).expect_err("nothing to submit");
         assert!(format!("{error}").contains("not inside a form"), "{error}");
@@ -4609,7 +4805,10 @@ mod network_tests {
         );
         // A short page is not a challenge. Saying otherwise would tell an agent
         // it was blocked by a site that simply had little to say.
-        assert_eq!(challenge_marker("<html><body><p>Not found.</p></body></html>"), None);
+        assert_eq!(
+            challenge_marker("<html><body><p>Not found.</p></body></html>"),
+            None
+        );
         assert_eq!(
             challenge_marker("<p>This article explains how to enable JavaScript.</p>"),
             None
@@ -4618,11 +4817,26 @@ mod network_tests {
 
     #[test]
     fn an_attribute_is_read_whichever_way_it_was_quoted() {
-        assert_eq!(attribute_value(r#"<meta content="a b">"#, "content"), Some("a b".into()));
-        assert_eq!(attribute_value(r#"<meta content='a b'>"#, "content"), Some("a b".into()));
-        assert_eq!(attribute_value(r#"<meta content=ab>"#, "content"), Some("ab".into()));
+        assert_eq!(
+            attribute_value(r#"<meta content="a b">"#, "content"),
+            Some("a b".into())
+        );
+        assert_eq!(
+            attribute_value(r#"<meta content='a b'>"#, "content"),
+            Some("a b".into())
+        );
+        assert_eq!(
+            attribute_value(r#"<meta content=ab>"#, "content"),
+            Some("ab".into())
+        );
         // Not the tail of another attribute: `data-content` is not `content`.
-        assert_eq!(attribute_value(r#"<meta data-content="x">"#, "content"), None);
-        assert_eq!(attribute_value(r#"<meta charset="utf-8">"#, "content"), None);
+        assert_eq!(
+            attribute_value(r#"<meta data-content="x">"#, "content"),
+            None
+        );
+        assert_eq!(
+            attribute_value(r#"<meta charset="utf-8">"#, "content"),
+            None
+        );
     }
 }

@@ -26,11 +26,8 @@ pub struct Limits {
     pub max_network_time: Duration,
     /// Wall clock since the navigation began, spent or not.
     ///
-    /// The one ceiling the others could not give. A page whose cost is parsing,
-    /// layout and fonts rather than waiting is inside every limit above and can
-    /// still load for two minutes; the engine then has no answer except
-    /// [`HardStop`], which is not an answer at all because it discards the page
-    /// instead of reporting it unfinished.
+    /// This limit also covers time spent parsing and laying out the page.
+    /// Native builds have a separate watchdog that terminates stalled renderers.
     ///
     /// Checked for [`Spender::Page`] alone. See there for why.
     #[serde(with = "millis", default = "default_max_load_time")]
@@ -162,10 +159,8 @@ impl Budget {
         self.wire_bytes.store(0, Ordering::Relaxed);
         self.decoded_bytes.store(0, Ordering::Relaxed);
         self.network_micros.store(0, Ordering::Relaxed);
-        self.navigation_micros.store(
-            self.epoch.elapsed().as_micros() as u64,
-            Ordering::Relaxed,
-        );
+        self.navigation_micros
+            .store(self.epoch.elapsed().as_micros() as u64, Ordering::Relaxed);
     }
 
     /// How long the current navigation has been loading.
@@ -350,13 +345,16 @@ impl Deadline {
 }
 
 /// The stop of last resort, for the half of this engine no deadline reaches.
+#[cfg(feature = "native")]
 pub struct HardStop {
     done: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
 }
 
 /// How far past its budget a navigation may go before the process stops.
+#[cfg(feature = "native")]
 const HARD_STOP_MARGIN: Duration = Duration::from_secs(60);
 
+#[cfg(feature = "native")]
 impl HardStop {
     pub fn arm(budget: Duration) -> Self {
         let done = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
@@ -393,6 +391,7 @@ impl HardStop {
     }
 }
 
+#[cfg(feature = "native")]
 impl Drop for HardStop {
     /// The navigation finished, however it finished.
     fn drop(&mut self) {
@@ -406,6 +405,7 @@ impl Drop for HardStop {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "native")]
     #[test]
     fn a_navigation_that_finishes_disarms_its_hard_stop() {
         // The half of `HardStop` that can be tested in process. The other half ends
@@ -443,7 +443,10 @@ mod tests {
             max_load_time: Duration::from_millis(40),
             ..Limits::default()
         });
-        assert!(budget.claim_request(Spender::Page).is_ok(), "inside the clock");
+        assert!(
+            budget.claim_request(Spender::Page).is_ok(),
+            "inside the clock"
+        );
         std::thread::sleep(Duration::from_millis(60));
         let refused = budget
             .claim_request(Spender::Page)
@@ -464,7 +467,10 @@ mod tests {
         // A navigation is a fresh decision by the principal, so it gets a
         // fresh clock along with everything else.
         budget.reset();
-        assert!(budget.claim_request(Spender::Page).is_ok(), "navigating starts it again");
+        assert!(
+            budget.claim_request(Spender::Page).is_ok(),
+            "navigating starts it again"
+        );
     }
 
     /// The clock measures time since the last navigation, spent or not, so an
@@ -533,9 +539,14 @@ mod tests {
     fn a_page_may_spend_up_to_its_allowance_and_not_past_it() {
         let budget = tight();
         for at in 1..=3 {
-            assert!(budget.claim_request(Spender::Page).is_ok(), "request {at} is within 3");
+            assert!(
+                budget.claim_request(Spender::Page).is_ok(),
+                "request {at} is within 3"
+            );
         }
-        let refused = budget.claim_request(Spender::Page).expect_err("the fourth is not");
+        let refused = budget
+            .claim_request(Spender::Page)
+            .expect_err("the fourth is not");
         assert!(refused.0.contains("budget-exceeded"), "{refused}");
         // Both numbers: what was spent, and what the ceiling was.
         assert!(refused.0.contains("made 4 requests"), "{refused}");
@@ -571,21 +582,27 @@ mod tests {
             let budget = tight();
             budget.record(2000, 0, Duration::ZERO);
             says(
-                budget.claim_request(who).expect_err("over the wire ceiling"),
+                budget
+                    .claim_request(who)
+                    .expect_err("over the wire ceiling"),
                 "across the wire",
             );
 
             let budget = tight();
             budget.record(0, 3000, Duration::ZERO);
             says(
-                budget.claim_request(who).expect_err("over the decoded ceiling"),
+                budget
+                    .claim_request(who)
+                    .expect_err("over the decoded ceiling"),
                 "decoded",
             );
 
             let budget = tight();
             budget.record(0, 0, Duration::from_millis(200));
             says(
-                budget.claim_request(who).expect_err("over the network clock"),
+                budget
+                    .claim_request(who)
+                    .expect_err("over the network clock"),
                 "waiting on the network",
             );
         }
@@ -614,7 +631,9 @@ mod tests {
         assert!(budget.claim_request(Spender::Page).is_ok());
         // Now past the wire ceiling.
         budget.record(600, 100, Duration::ZERO);
-        let refused = budget.claim_request(Spender::Page).expect_err("over the wire ceiling");
+        let refused = budget
+            .claim_request(Spender::Page)
+            .expect_err("over the wire ceiling");
         assert!(refused.0.contains("across the wire"), "{refused}");
     }
 
@@ -626,7 +645,9 @@ mod tests {
         assert!(budget.claim_request(Spender::Page).is_ok());
         // Tiny on the wire, enormous decoded: under one ceiling, over the other.
         budget.record(10, 5000, Duration::ZERO);
-        let refused = budget.claim_request(Spender::Page).expect_err("over the decoded ceiling");
+        let refused = budget
+            .claim_request(Spender::Page)
+            .expect_err("over the decoded ceiling");
         assert!(refused.0.contains("decoded"), "{refused}");
     }
 
@@ -637,9 +658,14 @@ mod tests {
         let budget = tight();
         assert!(budget.claim_request(Spender::Page).is_ok());
         budget.record(0, 0, Duration::from_millis(60));
-        assert!(budget.claim_request(Spender::Page).is_ok(), "60ms is within 100ms");
+        assert!(
+            budget.claim_request(Spender::Page).is_ok(),
+            "60ms is within 100ms"
+        );
         budget.record(0, 0, Duration::from_millis(60));
-        let refused = budget.claim_request(Spender::Page).expect_err("120ms is not");
+        let refused = budget
+            .claim_request(Spender::Page)
+            .expect_err("120ms is not");
         assert!(refused.0.contains("waiting on the network"), "{refused}");
     }
 

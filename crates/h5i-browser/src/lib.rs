@@ -1,41 +1,51 @@
 //! h5i browser: a lightweight visual browser engine for coding agents.
 
 pub mod broker;
-pub mod cli;
-pub mod edits;
-pub mod encoding;
+pub mod budget;
 pub mod canvas;
 pub mod capture;
-pub mod cors;
-pub mod budget;
+#[cfg(feature = "cli")]
+pub mod cli;
 pub mod cookies;
+pub mod cors;
+#[cfg(feature = "native")]
 pub mod dom_inject;
+mod dom_query;
+pub mod edits;
+pub mod encoding;
 pub mod engine;
 pub mod extract;
+pub mod fonts;
+#[cfg(feature = "native")]
 pub mod grpc;
+pub mod hints;
 #[cfg(feature = "identity")]
 pub mod identity;
-pub mod hints;
+#[cfg(feature = "native")]
+pub mod ipc;
 pub mod keys;
-pub mod fonts;
 pub mod markdown;
 pub mod multipart;
-pub mod ipc;
 pub mod net;
 pub mod policy;
+#[cfg(feature = "native")]
 pub mod rawsock;
 pub mod read_ir;
 pub mod receipt;
 pub mod replay;
+#[cfg(feature = "javascript")]
 pub mod script;
-pub mod selector;
 pub mod secrets;
+pub mod selector;
 pub mod snapshot;
+#[cfg(feature = "native")]
 pub mod sse;
-pub mod structured;
+#[cfg(feature = "cli")]
 pub mod stream;
+pub mod structured;
 pub mod transcript;
 pub mod verbs;
+#[cfg(feature = "native")]
 pub mod ws;
 pub mod wsclient;
 
@@ -44,7 +54,9 @@ pub use engine::{Page, PageFactory, PageOptions};
 #[cfg(feature = "identity")]
 pub use identity::Identity;
 pub use policy::{Policy, Verdict};
-pub use receipt::{JsonlSink, MemorySink, RequestRecord, Sink};
+#[cfg(feature = "native")]
+pub use receipt::JsonlSink;
+pub use receipt::{MemorySink, RequestRecord, Sink};
 
 /// What this engine can and cannot do, answered rather than guessed at.
 ///
@@ -89,19 +101,20 @@ impl Capabilities {
 
     /// What this engine can do with script either on or off.
     pub fn with_script(javascript: bool) -> Self {
+        let javascript = javascript && cfg!(feature = "javascript");
         Self {
             engine: "h5i-browser".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             javascript,
             screenshot: true,
             snapshot: true,
-            live_view: true,
+            live_view: cfg!(feature = "cli"),
             video: false,
             captions: true,
             webgl: false,
             downloads: false,
             canvas_2d: javascript,
-            websockets: javascript,
+            websockets: javascript && cfg!(feature = "native"),
             fail_closed_receipts: true,
         }
     }
@@ -135,8 +148,13 @@ mod tests {
         assert!(!caps.websockets);
 
         let scripted = Capabilities::with_script(true);
-        assert!(scripted.canvas_2d);
-        assert!(scripted.websockets);
+        assert_eq!(scripted.javascript, cfg!(feature = "javascript"));
+        assert_eq!(scripted.canvas_2d, cfg!(feature = "javascript"));
+        assert_eq!(
+            scripted.websockets,
+            cfg!(all(feature = "javascript", feature = "native"))
+        );
+        assert_eq!(scripted.live_view, cfg!(feature = "cli"));
         // And the ones that are absent whatever the configuration stay absent.
         assert!(!scripted.webgl);
         assert!(!scripted.video);
