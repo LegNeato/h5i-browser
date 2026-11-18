@@ -1,7 +1,8 @@
-use anyrender::ImageRenderer;
+use anyrender::{ImageRenderer, PaintScene, Scene};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_paint::paint_scene;
 use h5i_error::H5iError;
+use vello_cpu::kurbo::Affine;
 
 use super::{Page, encode_png};
 
@@ -55,24 +56,27 @@ impl Page {
             f64::from(self.options.scale),
             max_edge,
         )?;
-        let mut renderer = VelloCpuImageRenderer::new(geometry.width, geometry.height);
-        let mut rgba = Vec::new();
+        // Parley metrics already include the document's viewport scale. Keep
+        // that scale during painting, then transform every recorded command.
+        let mut recorded = Scene::new();
         let mut doc = self.doc.borrow_mut();
-        renderer.render_to_vec(
-            |scene| {
-                paint_scene(
-                    scene,
-                    &mut doc,
-                    geometry.scale,
-                    geometry.width,
-                    geometry.height,
-                    0,
-                    0,
-                );
-            },
-            &mut rgba,
+        paint_scene(
+            &mut recorded,
+            &mut doc,
+            f64::from(self.options.scale),
+            self.options.width,
+            self.options.height,
+            0,
+            0,
         );
         drop(doc);
+        let ratio = geometry.scale / f64::from(self.options.scale);
+        let mut renderer = VelloCpuImageRenderer::new(geometry.width, geometry.height);
+        let mut rgba = Vec::new();
+        renderer.render_to_vec(
+            |scene| scene.append_scene(recorded, Affine::scale(ratio)),
+            &mut rgba,
+        );
         Ok(PngCapture {
             width: geometry.width,
             height: geometry.height,
