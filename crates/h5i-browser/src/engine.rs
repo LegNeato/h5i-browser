@@ -26,6 +26,9 @@ use crate::net::BrokerNet;
 use crate::receipt::Initiator;
 use crate::snapshot::Snapshot;
 
+mod capture;
+pub use capture::PngCapture;
+
 /// Viewport and budget for a page.
 #[derive(Debug, Clone)]
 pub struct PageOptions {
@@ -3284,6 +3287,8 @@ fn seed_checkbox_state(doc: &mut BaseDocument) {
 #[cfg(test)]
 #[cfg(feature = "native")]
 mod tests {
+    mod capture;
+
     use super::*;
     use crate::policy::Policy;
     use crate::receipt::MemorySink;
