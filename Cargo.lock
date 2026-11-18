@@ -125,7 +125,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "545d02c58581dc659b65bab63aef1aebcbcc442c96a49a599019c93ac03b1e42"
 dependencies = [
  "anyrender",
- "debug_timer",
+ "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "glifo",
  "kurbo",
  "peniko",
@@ -209,8 +209,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9f438e914c626f4f56cd58cd88045e164e1ac32e12d7c24d09c25121328161e"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -219,7 +218,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer",
+ "debug_timer 0.1.3 (git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c)",
  "euclid",
  "html-escape",
  "image",
@@ -241,6 +240,7 @@ dependencies = [
  "stylo_taffy",
  "stylo_traits",
  "taffy",
+ "thiserror",
  "thread_local",
  "url",
  "web-time",
@@ -249,8 +249,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e13102df7e67fc61122b525b0f7dcc0ee8b88cdd4ea19e2d49ba2c46b51489"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -261,8 +260,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38a033d71915e8ded2b046b134c06c8042a0f1907f7624b6b6365bf99977c845"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 dependencies = [
  "anyrender",
  "blitz-dom",
@@ -280,8 +278,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bbf266d7d6d2cf00e79d2158b0fa399ff38f75c0e2d84caeb2e90ff1d7fb3f8"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -891,6 +888,11 @@ name = "debug_timer"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
+
+[[package]]
+name = "debug_timer"
+version = "0.1.3"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 
 [[package]]
 name = "deranged"
@@ -3483,8 +3485,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6f8e06f0038eb2e01c558b3004cb07c1ee1ab27f23aecbfbf629f55b0307e1"
+source = "git+https://github.com/LegNeato/blitz?rev=d7a76ee7417b0acde59105b38f3625c322bcc41c#d7a76ee7417b0acde59105b38f3625c322bcc41c"
 dependencies = [
  "stylo",
  "stylo_atoms",

@@ -38,3 +38,9 @@ h5i-browser = { path = "crates/h5i-browser" }
 [patch.crates-io]
 boa_engine = { git = "https://github.com/h5i-dev/boa", rev = "f3d34b44" }
 boa_gc = { git = "https://github.com/h5i-dev/boa", rev = "f3d34b44" }
+
+# Shared immutable browser styles require the companion Blitz implementation.
+blitz-dom = { git = "https://github.com/LegNeato/blitz", rev = "d7a76ee7417b0acde59105b38f3625c322bcc41c" }
+blitz-html = { git = "https://github.com/LegNeato/blitz", rev = "d7a76ee7417b0acde59105b38f3625c322bcc41c" }
+blitz-paint = { git = "https://github.com/LegNeato/blitz", rev = "d7a76ee7417b0acde59105b38f3625c322bcc41c" }
+blitz-traits = { git = "https://github.com/LegNeato/blitz", rev = "d7a76ee7417b0acde59105b38f3625c322bcc41c" }

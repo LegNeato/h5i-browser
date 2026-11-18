@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyrender::ImageRenderer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::node::SpecialElementData;
-use blitz_dom::{BaseDocument, DocumentConfig, local_name};
+use blitz_dom::{BaseDocument, DocumentConfig, StaticUserAgentStylesheet, local_name};
 use blitz_html::HtmlDocument;
 use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
@@ -1017,8 +1017,24 @@ impl Page {
     /// the next one has an obvious home, and so it runs on every path that
     /// builds a document rather than on whichever one somebody remembered.
     fn apply_ua_stylesheet(doc: &mut BaseDocument) {
-        doc.add_user_agent_stylesheet(Self::CANVAS_UA_CSS);
-        doc.add_user_agent_stylesheet(Self::POPOVER_UA_CSS);
+        static CANVAS: std::sync::LazyLock<StaticUserAgentStylesheet> =
+            std::sync::LazyLock::new(|| {
+                StaticUserAgentStylesheet::parse(
+                    Page::CANVAS_UA_CSS,
+                    Url::parse("about:blank").expect("the built-in stylesheet URL is valid"),
+                )
+                .expect("the canvas stylesheet has no imports")
+            });
+        static POPOVER: std::sync::LazyLock<StaticUserAgentStylesheet> =
+            std::sync::LazyLock::new(|| {
+                StaticUserAgentStylesheet::parse(
+                    Page::POPOVER_UA_CSS,
+                    Url::parse("about:blank").expect("the built-in stylesheet URL is valid"),
+                )
+                .expect("the popover stylesheet has no imports")
+            });
+        doc.add_static_user_agent_stylesheet(&CANVAS);
+        doc.add_static_user_agent_stylesheet(&POPOVER);
     }
 
     pub fn from_html(
